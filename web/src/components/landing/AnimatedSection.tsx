@@ -4,7 +4,7 @@ import { motion, useInView } from 'framer-motion'
 export default function AnimatedSection({
   children,
   id,
-  backgroundColor = 'var(--brand-black)',
+  backgroundColor = 'var(--background)',
 }: {
   children: React.ReactNode
   id?: string
