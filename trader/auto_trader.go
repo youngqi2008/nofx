@@ -582,6 +582,45 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		}
 	}
 
+    // ✅ 新增：检查是否有已平仓但仍有挂单的情况，并清理这些挂单
+	// 记录有持仓的币种集合
+	activeSymbols := make(map[string]bool)
+	for _, pos := range positions {
+		quantity := pos["positionAmt"].(float64)
+		if quantity != 0 {
+			symbol := pos["symbol"].(string)
+			activeSymbols[symbol] = true
+		}
+	}
+
+	// 获取所有未完成订单
+	allOpenOrders, err := at.trader.GetOpenOrders("")
+	if err != nil {
+		log.Printf("⚠️  获取未完成订单失败，跳过清理残留挂单: %v", err)
+	} else {
+		// 按币种分组订单
+		ordersBySymbol := make(map[string][]map[string]interface{})
+		for _, order := range allOpenOrders {
+			symbol, ok := order["symbol"].(string)
+			if !ok {
+				continue
+			}
+			ordersBySymbol[symbol] = append(ordersBySymbol[symbol], order)
+		}
+
+		// 检查每个币种：如果没有持仓但仍有挂单，取消这些挂单
+		for symbol, orders := range ordersBySymbol {
+			if !activeSymbols[symbol] {
+				// 该币种没有持仓，但仍有挂单，需要清理
+				log.Printf("🧹 检测到 %s 已平仓但仍有 %d 个挂单，正在清理...", symbol, len(orders))
+				if err := at.trader.CancelAllOrders(symbol); err != nil {
+					log.Printf("  ⚠️  清理 %s 的残留挂单失败: %v", symbol, err)
+				} else {
+					log.Printf("  ✓ 已清理 %s 的 %d 个残留挂单", symbol, len(orders))
+				}
+			}
+		}
+	}
 	// 3. 获取交易员的候选币种池
 	candidateCoins, err := at.getCandidateCoins()
 	if err != nil {
