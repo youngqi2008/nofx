@@ -545,7 +545,7 @@ func (t *FuturesTrader) CloseShort(symbol string, quantity float64) (map[string]
 // CancelStopLossOrders 仅取消止损单（不影响止盈单）
 // 注意：现在使用Algo Order API创建止损/止盈，需要使用条件订单的查询和取消接口
 func (t *FuturesTrader) CancelStopLossOrders(symbol string) error {
-	// 查询条件订单（使用algoOrders查询当前挂单，而不是allAlgoOrders）
+	// 查询条件订单（使用openAlgoOrders查询当前挂单）
 	algoOrders, err := t.queryAlgoOrders(symbol)
 	if err != nil {
 		return fmt.Errorf("获取条件订单失败: %w", err)
@@ -644,17 +644,43 @@ func (t *FuturesTrader) CancelTakeProfitOrders(symbol string) error {
 	return nil
 }
 
-// CancelAllOrders 取消该币种的所有挂单
+// CancelAllOrders 取消该币种的所有挂单（包括普通订单和条件订单）
 func (t *FuturesTrader) CancelAllOrders(symbol string) error {
+	var errors []error
+
+	// 1. 取消所有普通订单
 	err := t.client.NewCancelAllOpenOrdersService().
 		Symbol(symbol).
 		Do(context.Background())
 
 	if err != nil {
-		return fmt.Errorf("取消挂单失败: %w", err)
+		errors = append(errors, fmt.Errorf("取消普通订单失败: %w", err))
 	}
 
-	log.Printf("  ✓ 已取消 %s 的所有挂单", symbol)
+	// 2. 取消所有条件订单
+	algoOrders, err := t.queryAlgoOrders(symbol)
+	if err != nil {
+		// 如果查询失败，只记录错误但不中断（可能没有条件订单）
+		log.Printf("  ⚠ 查询条件订单失败: %v", err)
+	} else {
+		// 取消所有条件订单
+		for _, algoOrder := range algoOrders {
+			algoId, ok := algoOrder["algoId"].(float64)
+			if !ok {
+				continue
+			}
+			if err := t.cancelAlgoOrder(symbol, int64(algoId)); err != nil {
+				errors = append(errors, fmt.Errorf("取消条件订单 %d 失败: %w", int64(algoId), err))
+			}
+		}
+	}
+
+	// 如果有错误，返回第一个错误
+	if len(errors) > 0 {
+		return errors[0]
+	}
+
+	log.Printf("  ✓ 已取消 %s 的所有挂单（包括普通订单和条件订单）", symbol)
 	return nil
 }
 
@@ -886,7 +912,7 @@ func (t *FuturesTrader) generateSignature(queryString string) string {
 }
 
 // queryAlgoOrders 查询条件订单（当前挂单）
-// 参考: https://developers.binance.com/docs/zh-CN/derivatives/usds-margined-futures/trade/rest-api/Query-All-Algo-Orders
+// 使用 GET /fapi/v1/openAlgoOrders 接口查询当前所有条件订单
 func (t *FuturesTrader) queryAlgoOrders(symbol string) ([]map[string]interface{}, error) {
 	// 构建请求参数
 	params := url.Values{}
@@ -900,7 +926,7 @@ func (t *FuturesTrader) queryAlgoOrders(symbol string) ([]map[string]interface{}
 
 	// 构建请求URL - 查询当前条件挂单
 	baseURL := "https://fapi.binance.com"
-	reqURL := fmt.Sprintf("%s/fapi/v1/algoOrders?%s", baseURL, params.Encode())
+	reqURL := fmt.Sprintf("%s/fapi/v1/openAlgoOrders?%s", baseURL, params.Encode())
 
 	// 创建HTTP请求
 	req, err := http.NewRequest("GET", reqURL, nil)
@@ -997,17 +1023,19 @@ func (t *FuturesTrader) cancelAlgoOrder(symbol string, algoId int64) error {
 }
 
 // GetOpenOrders 获取所有挂单（用于清理孤儿订单）
+// 注意：需要同时查询普通订单（/fapi/v1/openOrders）和条件订单（/fapi/v1/openAlgoOrders）
 func (t *FuturesTrader) GetOpenOrders() (map[string][]map[string]interface{}, error) {
-	// 获取所有未完成订单（不指定symbol，获取所有币种的挂单）
+	result := make(map[string][]map[string]interface{})
+
+	// 1. 获取所有普通订单（使用 /fapi/v1/openOrders）
 	orders, err := t.client.NewListOpenOrdersService().
 		Do(context.Background())
 
 	if err != nil {
-		return nil, fmt.Errorf("获取挂单失败: %w", err)
+		return nil, fmt.Errorf("获取普通挂单失败: %w", err)
 	}
 
-	// 按币种分组
-	result := make(map[string][]map[string]interface{})
+	// 按币种分组普通订单
 	for _, order := range orders {
 		symbol := order.Symbol
 		orderMap := map[string]interface{}{
@@ -1020,7 +1048,92 @@ func (t *FuturesTrader) GetOpenOrders() (map[string][]map[string]interface{}, er
 		result[symbol] = append(result[symbol], orderMap)
 	}
 
+	// 2. 获取所有条件订单（使用 /fapi/v1/openAlgoOrders）
+	// 查询当前所有条件订单，如果失败则忽略（不影响普通订单的返回）
+	allAlgoOrders, err := t.queryAllAlgoOrders()
+	if err != nil {
+		// 如果查询条件订单失败，只返回普通订单（不影响主要功能）
+		log.Printf("  ⚠ 获取条件订单失败（将只返回普通订单）: %v", err)
+		return result, nil
+	}
+
+	// 按币种分组条件订单
+	for _, algoOrder := range allAlgoOrders {
+		symbol, _ := algoOrder["symbol"].(string)
+		if symbol == "" {
+			continue
+		}
+		algoId, _ := algoOrder["algoId"].(float64)
+		orderType, _ := algoOrder["orderType"].(string)
+		positionSide, _ := algoOrder["positionSide"].(string)
+		side, _ := algoOrder["side"].(string)
+
+		orderMap := map[string]interface{}{
+			"symbol":      symbol,
+			"orderId":     int64(algoId), // 使用algoId作为orderId
+			"algoId":      int64(algoId), // 同时保存algoId
+			"type":        orderType,
+			"positionSide": positionSide,
+			"side":        side,
+			"isAlgoOrder": true, // 标记为条件订单
+		}
+		result[symbol] = append(result[symbol], orderMap)
+	}
+
 	return result, nil
+}
+
+// queryAllAlgoOrders 查询所有条件订单（不指定symbol）
+// 使用 GET /fapi/v1/openAlgoOrders 接口查询当前所有条件订单
+func (t *FuturesTrader) queryAllAlgoOrders() ([]map[string]interface{}, error) {
+	// 构建请求参数（不指定symbol，查询所有条件订单）
+	params := url.Values{}
+	params.Set("timestamp", strconv.FormatInt(time.Now().UnixMilli(), 10))
+
+	// 生成签名
+	queryString := params.Encode()
+	signature := t.generateSignature(queryString)
+	params.Set("signature", signature)
+
+	// 构建请求URL - 查询所有条件挂单
+	baseURL := "https://fapi.binance.com"
+	reqURL := fmt.Sprintf("%s/fapi/v1/openAlgoOrders?%s", baseURL, params.Encode())
+
+	// 创建HTTP请求
+	req, err := http.NewRequest("GET", reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	// 设置请求头
+	req.Header.Set("X-MBX-APIKEY", t.apiKey)
+
+	// 发送请求
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 读取响应
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	// 检查响应状态
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API错误 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	// 解析JSON响应
+	var orders []map[string]interface{}
+	if err := json.Unmarshal(body, &orders); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	return orders, nil
 }
 
 // GetMinNotional 获取最小名义价值（Binance要求）
