@@ -2,10 +2,16 @@ package trader
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"nofx/hook"
 	"strconv"
 	"strings"
@@ -45,7 +51,9 @@ func getBrOrderID() string {
 
 // FuturesTrader 币安合约交易器
 type FuturesTrader struct {
-	client *futures.Client
+	client    *futures.Client
+	apiKey    string
+	secretKey string
 
 	// 余额缓存
 	cachedBalance     map[string]interface{}
@@ -73,7 +81,9 @@ func NewFuturesTrader(apiKey, secretKey string, userId string) *FuturesTrader {
 	// 同步时间，避免 Timestamp ahead 错误
 	syncBinanceServerTime(client)
 	trader := &FuturesTrader{
-		client:        client,
+		client:      client,
+		apiKey:      apiKey,
+		secretKey:   secretKey,
 		cacheDuration: 15 * time.Second, // 15秒缓存
 	}
 
@@ -533,38 +543,39 @@ func (t *FuturesTrader) CloseShort(symbol string, quantity float64) (map[string]
 }
 
 // CancelStopLossOrders 仅取消止损单（不影响止盈单）
+// 注意：现在使用Algo Order API创建止损/止盈，需要使用条件订单的查询和取消接口
 func (t *FuturesTrader) CancelStopLossOrders(symbol string) error {
-	// 获取该币种的所有未完成订单
-	orders, err := t.client.NewListOpenOrdersService().
-		Symbol(symbol).
-		Do(context.Background())
-
+	// 查询条件订单（使用algoOrders查询当前挂单，而不是allAlgoOrders）
+	algoOrders, err := t.queryAlgoOrders(symbol)
 	if err != nil {
-		return fmt.Errorf("获取未完成订单失败: %w", err)
+		return fmt.Errorf("获取条件订单失败: %w", err)
 	}
 
 	// 过滤出止损单并取消（取消所有方向的止损单，包括LONG和SHORT）
 	canceledCount := 0
 	var cancelErrors []error
-	for _, order := range orders {
-		orderType := order.Type
+	for _, order := range algoOrders {
+		orderType, _ := order["orderType"].(string)
 
 		// 只取消止损订单（不取消止盈订单）
-		if orderType == futures.OrderTypeStopMarket || orderType == futures.OrderTypeStop {
-			_, err := t.client.NewCancelOrderService().
-				Symbol(symbol).
-				OrderID(order.OrderID).
-				Do(context.Background())
+		if orderType == "STOP_MARKET" || orderType == "STOP" {
+			algoId, ok := order["algoId"].(float64)
+			if !ok {
+				log.Printf("  ⚠ 无法获取algoId，跳过订单: %v", order)
+				continue
+			}
 
+			err := t.cancelAlgoOrder(symbol, int64(algoId))
 			if err != nil {
-				errMsg := fmt.Sprintf("订单ID %d: %v", order.OrderID, err)
+				errMsg := fmt.Sprintf("algoId %d: %v", int64(algoId), err)
 				cancelErrors = append(cancelErrors, fmt.Errorf("%s", errMsg))
 				log.Printf("  ⚠ 取消止损单失败: %s", errMsg)
 				continue
 			}
 
 			canceledCount++
-			log.Printf("  ✓ 已取消止损单 (订单ID: %d, 类型: %s, 方向: %s)", order.OrderID, orderType, order.PositionSide)
+			positionSide, _ := order["positionSide"].(string)
+			log.Printf("  ✓ 已取消止损单 (algoId: %d, 类型: %s, 方向: %s)", int64(algoId), orderType, positionSide)
 		}
 	}
 
@@ -583,38 +594,39 @@ func (t *FuturesTrader) CancelStopLossOrders(symbol string) error {
 }
 
 // CancelTakeProfitOrders 仅取消止盈单（不影响止损单）
+// 注意：现在使用Algo Order API创建止损/止盈，需要使用条件订单的查询和取消接口
 func (t *FuturesTrader) CancelTakeProfitOrders(symbol string) error {
-	// 获取该币种的所有未完成订单
-	orders, err := t.client.NewListOpenOrdersService().
-		Symbol(symbol).
-		Do(context.Background())
-
+	// 查询条件订单
+	algoOrders, err := t.queryAlgoOrders(symbol)
 	if err != nil {
-		return fmt.Errorf("获取未完成订单失败: %w", err)
+		return fmt.Errorf("获取条件订单失败: %w", err)
 	}
 
 	// 过滤出止盈单并取消（取消所有方向的止盈单，包括LONG和SHORT）
 	canceledCount := 0
 	var cancelErrors []error
-	for _, order := range orders {
-		orderType := order.Type
+	for _, order := range algoOrders {
+		orderType, _ := order["orderType"].(string)
 
 		// 只取消止盈订单（不取消止损订单）
-		if orderType == futures.OrderTypeTakeProfitMarket || orderType == futures.OrderTypeTakeProfit {
-			_, err := t.client.NewCancelOrderService().
-				Symbol(symbol).
-				OrderID(order.OrderID).
-				Do(context.Background())
+		if orderType == "TAKE_PROFIT_MARKET" || orderType == "TAKE_PROFIT" {
+			algoId, ok := order["algoId"].(float64)
+			if !ok {
+				log.Printf("  ⚠ 无法获取algoId，跳过订单: %v", order)
+				continue
+			}
 
+			err := t.cancelAlgoOrder(symbol, int64(algoId))
 			if err != nil {
-				errMsg := fmt.Sprintf("订单ID %d: %v", order.OrderID, err)
+				errMsg := fmt.Sprintf("algoId %d: %v", int64(algoId), err)
 				cancelErrors = append(cancelErrors, fmt.Errorf("%s", errMsg))
 				log.Printf("  ⚠ 取消止盈单失败: %s", errMsg)
 				continue
 			}
 
 			canceledCount++
-			log.Printf("  ✓ 已取消止盈单 (订单ID: %d, 类型: %s, 方向: %s)", order.OrderID, orderType, order.PositionSide)
+			positionSide, _ := order["positionSide"].(string)
+			log.Printf("  ✓ 已取消止盈单 (algoId: %d, 类型: %s, 方向: %s)", int64(algoId), orderType, positionSide)
 		}
 	}
 
@@ -647,40 +659,40 @@ func (t *FuturesTrader) CancelAllOrders(symbol string) error {
 }
 
 // CancelStopOrders 取消该币种的止盈/止损单（用于调整止盈止损位置）
+// 注意：现在使用Algo Order API创建止损/止盈，需要使用条件订单的查询和取消接口
 func (t *FuturesTrader) CancelStopOrders(symbol string) error {
-	// 获取该币种的所有未完成订单
-	orders, err := t.client.NewListOpenOrdersService().
-		Symbol(symbol).
-		Do(context.Background())
-
+	// 查询条件订单
+	algoOrders, err := t.queryAlgoOrders(symbol)
 	if err != nil {
-		return fmt.Errorf("获取未完成订单失败: %w", err)
+		return fmt.Errorf("获取条件订单失败: %w", err)
 	}
 
 	// 过滤出止盈止损单并取消
 	canceledCount := 0
-	for _, order := range orders {
-		orderType := order.Type
+	for _, order := range algoOrders {
+		orderType, _ := order["orderType"].(string)
 
 		// 只取消止损和止盈订单
-		if orderType == futures.OrderTypeStopMarket ||
-			orderType == futures.OrderTypeTakeProfitMarket ||
-			orderType == futures.OrderTypeStop ||
-			orderType == futures.OrderTypeTakeProfit {
+		if orderType == "STOP_MARKET" ||
+			orderType == "TAKE_PROFIT_MARKET" ||
+			orderType == "STOP" ||
+			orderType == "TAKE_PROFIT" {
 
-			_, err := t.client.NewCancelOrderService().
-				Symbol(symbol).
-				OrderID(order.OrderID).
-				Do(context.Background())
+			algoId, ok := order["algoId"].(float64)
+			if !ok {
+				log.Printf("  ⚠ 无法获取algoId，跳过订单: %v", order)
+				continue
+			}
 
+			err := t.cancelAlgoOrder(symbol, int64(algoId))
 			if err != nil {
-				log.Printf("  ⚠ 取消订单 %d 失败: %v", order.OrderID, err)
+				log.Printf("  ⚠ 取消订单 %d 失败: %v", int64(algoId), err)
 				continue
 			}
 
 			canceledCount++
-			log.Printf("  ✓ 已取消 %s 的止盈/止损单 (订单ID: %d, 类型: %s)",
-				symbol, order.OrderID, orderType)
+			log.Printf("  ✓ 已取消 %s 的止盈/止损单 (algoId: %d, 类型: %s)",
+				symbol, int64(algoId), orderType)
 		}
 	}
 
@@ -720,17 +732,17 @@ func (t *FuturesTrader) CalculatePositionSize(balance, riskPercent, price float6
 	return quantity
 }
 
-// SetStopLoss 设置止损单
+// SetStopLoss 设置止损单（使用Algo Order API）
 func (t *FuturesTrader) SetStopLoss(symbol string, positionSide string, quantity, stopPrice float64) error {
-	var side futures.SideType
-	var posSide futures.PositionSideType
+	var side string
+	var posSide string
 
 	if positionSide == "LONG" {
-		side = futures.SideTypeSell
-		posSide = futures.PositionSideTypeLong
+		side = "SELL"
+		posSide = "LONG"
 	} else {
-		side = futures.SideTypeBuy
-		posSide = futures.PositionSideTypeShort
+		side = "BUY"
+		posSide = "SHORT"
 	}
 
 	// 格式化数量
@@ -739,17 +751,8 @@ func (t *FuturesTrader) SetStopLoss(symbol string, positionSide string, quantity
 		return err
 	}
 
-	_, err = t.client.NewCreateOrderService().
-		Symbol(symbol).
-		Side(side).
-		PositionSide(posSide).
-		Type(futures.OrderTypeStopMarket).
-		StopPrice(fmt.Sprintf("%.8f", stopPrice)).
-		Quantity(quantityStr).
-		WorkingType(futures.WorkingTypeContractPrice).
-		ClosePosition(true).
-		Do(context.Background())
-
+	// 使用Algo Order API创建止损单
+	err = t.createAlgoOrder(symbol, side, posSide, "STOP_MARKET", quantityStr, stopPrice)
 	if err != nil {
 		return fmt.Errorf("设置止损失败: %w", err)
 	}
@@ -758,17 +761,17 @@ func (t *FuturesTrader) SetStopLoss(symbol string, positionSide string, quantity
 	return nil
 }
 
-// SetTakeProfit 设置止盈单
+// SetTakeProfit 设置止盈单（使用Algo Order API）
 func (t *FuturesTrader) SetTakeProfit(symbol string, positionSide string, quantity, takeProfitPrice float64) error {
-	var side futures.SideType
-	var posSide futures.PositionSideType
+	var side string
+	var posSide string
 
 	if positionSide == "LONG" {
-		side = futures.SideTypeSell
-		posSide = futures.PositionSideTypeLong
+		side = "SELL"
+		posSide = "LONG"
 	} else {
-		side = futures.SideTypeBuy
-		posSide = futures.PositionSideTypeShort
+		side = "BUY"
+		posSide = "SHORT"
 	}
 
 	// 格式化数量
@@ -777,23 +780,247 @@ func (t *FuturesTrader) SetTakeProfit(symbol string, positionSide string, quanti
 		return err
 	}
 
-	_, err = t.client.NewCreateOrderService().
-		Symbol(symbol).
-		Side(side).
-		PositionSide(posSide).
-		Type(futures.OrderTypeTakeProfitMarket).
-		StopPrice(fmt.Sprintf("%.8f", takeProfitPrice)).
-		Quantity(quantityStr).
-		WorkingType(futures.WorkingTypeContractPrice).
-		ClosePosition(true).
-		Do(context.Background())
-
+	// 使用Algo Order API创建止盈单
+	err = t.createAlgoOrder(symbol, side, posSide, "TAKE_PROFIT_MARKET", quantityStr, takeProfitPrice)
 	if err != nil {
 		return fmt.Errorf("设置止盈失败: %w", err)
 	}
 
 	log.Printf("  止盈价设置: %.4f", takeProfitPrice)
 	return nil
+}
+
+// createAlgoOrder 使用Algo Order API创建条件订单（止损/止盈）
+// 参考: https://developers.binance.com/docs/zh-CN/derivatives/usds-margined-futures/trade/rest-api/New-Algo-Order
+func (t *FuturesTrader) createAlgoOrder(symbol, side, positionSide, orderType, quantityStr string, stopPrice float64) error {
+	// 格式化触发价格
+	triggerPriceStr := fmt.Sprintf("%.8f", stopPrice)
+
+	// 构建请求参数
+	params := url.Values{}
+	params.Set("algoType", "CONDITIONAL") // 必须设置为CONDITIONAL
+	params.Set("symbol", symbol)
+	params.Set("side", side)
+	params.Set("positionSide", positionSide)
+	params.Set("type", orderType)
+	params.Set("triggerPrice", triggerPriceStr) // 使用triggerPrice而不是stopPrice
+	params.Set("workingType", "CONTRACT_PRICE")
+	params.Set("timeInForce", "GTC")
+	// 使用closePosition=true来平仓，而不是指定quantity
+	// 根据文档：STOP_MARKET和TAKE_PROFIT_MARKET配合closePosition=true可以平掉当时持有的所有仓位
+	params.Set("closePosition", "true")
+	params.Set("timestamp", strconv.FormatInt(time.Now().UnixMilli(), 10))
+
+	// 生成签名（在添加signature之前）
+	queryString := params.Encode()
+	signature := t.generateSignature(queryString)
+	params.Set("signature", signature)
+
+	// 构建请求URL - 使用Algo Order API端点
+	baseURL := "https://fapi.binance.com"
+	reqURL := fmt.Sprintf("%s/fapi/v1/algoOrder", baseURL)
+
+	// 创建HTTP请求，参数放在请求体中
+	req, err := http.NewRequest("POST", reqURL, strings.NewReader(params.Encode()))
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	// 设置请求头
+	req.Header.Set("X-MBX-APIKEY", t.apiKey)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	// 发送请求
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 读取响应
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	// 检查响应状态
+	if resp.StatusCode != http.StatusOK {
+		// 尝试解析JSON错误响应
+		bodyStr := string(body)
+		if strings.Contains(bodyStr, `"code"`) {
+			// 如果是JSON格式的错误响应，直接返回
+			return fmt.Errorf("API错误 (状态码: %d): %s", resp.StatusCode, bodyStr)
+		}
+		// 如果是HTML错误页面（如404），返回更友好的错误信息
+		if strings.Contains(bodyStr, "<!DOCTYPE html>") || strings.Contains(bodyStr, "<html>") {
+			return fmt.Errorf("API端点不存在 (状态码: %d): 请检查API端点是否正确", resp.StatusCode)
+		}
+		return fmt.Errorf("API错误 (状态码: %d): %s", resp.StatusCode, bodyStr)
+	}
+
+	// 检查响应体是否包含错误信息
+	bodyStr := string(body)
+	if strings.Contains(bodyStr, `"code"`) {
+		// 尝试解析JSON错误响应
+		if strings.Contains(bodyStr, "-4120") {
+			return fmt.Errorf("Binance API错误 -4120: %s", bodyStr)
+		}
+		// 其他错误代码也返回
+		if strings.Contains(bodyStr, `"msg"`) {
+			return fmt.Errorf("Binance API错误: %s", bodyStr)
+		}
+	}
+
+	// 成功响应通常包含algoId和clientAlgoId
+	// 响应格式: {"algoId": 2146760, "clientAlgoId": "...", "algoStatus": "NEW", ...}
+	log.Printf("  ✓ Algo订单创建成功: %s", bodyStr)
+	return nil
+}
+
+// generateSignature 生成HMAC SHA256签名
+func (t *FuturesTrader) generateSignature(queryString string) string {
+	mac := hmac.New(sha256.New, []byte(t.secretKey))
+	mac.Write([]byte(queryString))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// queryAlgoOrders 查询条件订单（当前挂单）
+// 参考: https://developers.binance.com/docs/zh-CN/derivatives/usds-margined-futures/trade/rest-api/Query-All-Algo-Orders
+func (t *FuturesTrader) queryAlgoOrders(symbol string) ([]map[string]interface{}, error) {
+	// 构建请求参数
+	params := url.Values{}
+	params.Set("symbol", symbol)
+	params.Set("timestamp", strconv.FormatInt(time.Now().UnixMilli(), 10))
+
+	// 生成签名
+	queryString := params.Encode()
+	signature := t.generateSignature(queryString)
+	params.Set("signature", signature)
+
+	// 构建请求URL - 查询当前条件挂单
+	baseURL := "https://fapi.binance.com"
+	reqURL := fmt.Sprintf("%s/fapi/v1/algoOrders?%s", baseURL, params.Encode())
+
+	// 创建HTTP请求
+	req, err := http.NewRequest("GET", reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	// 设置请求头
+	req.Header.Set("X-MBX-APIKEY", t.apiKey)
+
+	// 发送请求
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 读取响应
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	// 检查响应状态
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API错误 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	// 解析JSON响应
+	var orders []map[string]interface{}
+	if err := json.Unmarshal(body, &orders); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	return orders, nil
+}
+
+// cancelAlgoOrder 取消条件订单
+// 参考: https://developers.binance.com/docs/zh-CN/derivatives/usds-margined-futures/trade/rest-api/Cancel-Algo-Order
+func (t *FuturesTrader) cancelAlgoOrder(symbol string, algoId int64) error {
+	// 构建请求参数
+	params := url.Values{}
+	params.Set("symbol", symbol)
+	params.Set("algoId", strconv.FormatInt(algoId, 10))
+	params.Set("timestamp", strconv.FormatInt(time.Now().UnixMilli(), 10))
+
+	// 生成签名
+	queryString := params.Encode()
+	signature := t.generateSignature(queryString)
+	params.Set("signature", signature)
+
+	// 构建请求URL - 取消条件订单
+	baseURL := "https://fapi.binance.com"
+	reqURL := fmt.Sprintf("%s/fapi/v1/algoOrder?%s", baseURL, params.Encode())
+
+	// 创建HTTP请求（DELETE方法）
+	req, err := http.NewRequest("DELETE", reqURL, nil)
+	if err != nil {
+		return fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	// 设置请求头
+	req.Header.Set("X-MBX-APIKEY", t.apiKey)
+
+	// 发送请求
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 读取响应
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	// 检查响应状态
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("API错误 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	// 检查响应体是否包含错误信息
+	bodyStr := string(body)
+	if strings.Contains(bodyStr, `"code"`) {
+		if strings.Contains(bodyStr, `"msg"`) {
+			return fmt.Errorf("Binance API错误: %s", bodyStr)
+		}
+	}
+
+	return nil
+}
+
+// GetOpenOrders 获取所有挂单（用于清理孤儿订单）
+func (t *FuturesTrader) GetOpenOrders() (map[string][]map[string]interface{}, error) {
+	// 获取所有未完成订单（不指定symbol，获取所有币种的挂单）
+	orders, err := t.client.NewListOpenOrdersService().
+		Do(context.Background())
+
+	if err != nil {
+		return nil, fmt.Errorf("获取挂单失败: %w", err)
+	}
+
+	// 按币种分组
+	result := make(map[string][]map[string]interface{})
+	for _, order := range orders {
+		symbol := order.Symbol
+		orderMap := map[string]interface{}{
+			"symbol":      order.Symbol,
+			"orderId":     order.OrderID,
+			"type":        string(order.Type),
+			"positionSide": string(order.PositionSide),
+			"side":        string(order.Side),
+		}
+		result[symbol] = append(result[symbol], orderMap)
+	}
+
+	return result, nil
 }
 
 // GetMinNotional 获取最小名义价值（Binance要求）

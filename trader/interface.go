@@ -48,6 +48,11 @@ type Trader interface {
 	// CancelStopOrders 取消该币种的止盈/止损单（用于调整止盈止损位置）
 	CancelStopOrders(symbol string) error
 
+	// GetOpenOrders 获取所有挂单（返回 map[symbol][]order，用于清理孤儿订单）
+	// 返回格式: map[string][]map[string]interface{}
+	// 其中 order 包含: symbol, orderId, type, positionSide 等字段
+	GetOpenOrders() (map[string][]map[string]interface{}, error)
+
 	// FormatQuantity 格式化数量到正确的精度
 	FormatQuantity(symbol string, quantity float64) (string, error)
 }

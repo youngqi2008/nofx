@@ -707,6 +707,32 @@ func (t *HyperliquidTrader) CancelStopOrders(symbol string) error {
 	return nil
 }
 
+// GetOpenOrders 获取所有挂单（用于清理孤儿订单）
+func (t *HyperliquidTrader) GetOpenOrders() (map[string][]map[string]interface{}, error) {
+	// 获取所有挂单
+	openOrders, err := t.exchange.Info().OpenOrders(t.ctx, t.walletAddr)
+	if err != nil {
+		return nil, fmt.Errorf("获取挂单失败: %w", err)
+	}
+
+	// 按币种分组（需要将 coin 转换为 symbol）
+	result := make(map[string][]map[string]interface{})
+	for _, order := range openOrders {
+		// 将 coin 转换为 symbol（需要反向转换）
+		symbol := convertHyperliquidToSymbol(order.Coin)
+		orderMap := map[string]interface{}{
+			"symbol":      symbol,
+			"orderId":     order.Oid,
+			"type":        "UNKNOWN", // Hyperliquid 不暴露订单类型
+			"positionSide": "BOTH",   // Hyperliquid 不区分方向
+			"side":        "UNKNOWN",
+		}
+		result[symbol] = append(result[symbol], orderMap)
+	}
+
+	return result, nil
+}
+
 // GetMarketPrice 获取市场价格
 func (t *HyperliquidTrader) GetMarketPrice(symbol string) (float64, error) {
 	coin := convertSymbolToHyperliquid(symbol)
@@ -895,6 +921,16 @@ func convertSymbolToHyperliquid(symbol string) string {
 		return symbol[:len(symbol)-4]
 	}
 	return symbol
+}
+
+// convertHyperliquidToSymbol 将Hyperliquid格式转换为标准symbol
+// 例如: "BTC" -> "BTCUSDT"
+func convertHyperliquidToSymbol(coin string) string {
+	// 添加USDT后缀
+	if !strings.HasSuffix(coin, "USDT") {
+		return coin + "USDT"
+	}
+	return coin
 }
 
 // absFloat 返回浮点数的绝对值

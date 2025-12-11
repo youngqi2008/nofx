@@ -1082,6 +1082,11 @@ func (m *MockTrader) CancelStopOrders(symbol string) error {
 	return nil
 }
 
+func (m *MockTrader) GetOpenOrders() (map[string][]map[string]interface{}, error) {
+	// 返回空的挂单列表（测试时通常不需要挂单）
+	return make(map[string][]map[string]interface{}), nil
+}
+
 func (m *MockTrader) FormatQuantity(symbol string, quantity float64) (string, error) {
 	return fmt.Sprintf("%.4f", quantity), nil
 }

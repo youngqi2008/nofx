@@ -1222,6 +1222,43 @@ func (t *AsterTrader) CancelStopOrders(symbol string) error {
 	return nil
 }
 
+// GetOpenOrders 获取所有挂单（用于清理孤儿订单）
+func (t *AsterTrader) GetOpenOrders() (map[string][]map[string]interface{}, error) {
+	// 获取所有未完成订单（不指定symbol，获取所有币种的挂单）
+	params := map[string]interface{}{}
+	
+	body, err := t.request("GET", "/fapi/v3/openOrders", params)
+	if err != nil {
+		return nil, fmt.Errorf("获取挂单失败: %w", err)
+	}
+
+	var orders []map[string]interface{}
+	if err := json.Unmarshal(body, &orders); err != nil {
+		return nil, fmt.Errorf("解析订单数据失败: %w", err)
+	}
+
+	// 按币种分组
+	result := make(map[string][]map[string]interface{})
+	for _, order := range orders {
+		symbol, _ := order["symbol"].(string)
+		orderID, _ := order["orderId"].(float64)
+		orderType, _ := order["type"].(string)
+		positionSide, _ := order["positionSide"].(string)
+		side, _ := order["side"].(string)
+		
+		orderMap := map[string]interface{}{
+			"symbol":      symbol,
+			"orderId":     int64(orderID),
+			"type":        orderType,
+			"positionSide": positionSide,
+			"side":        side,
+		}
+		result[symbol] = append(result[symbol], orderMap)
+	}
+
+	return result, nil
+}
+
 // FormatQuantity 格式化数量（实现Trader接口）
 func (t *AsterTrader) FormatQuantity(symbol string, quantity float64) (string, error) {
 	formatted, err := t.formatQuantity(symbol, quantity)

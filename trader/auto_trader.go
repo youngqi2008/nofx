@@ -582,6 +582,9 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		}
 	}
 
+	// 2.5. 清理孤儿订单（有挂单但无持仓的情况，通常是止损/止盈触发后残留的订单）
+	at.cleanupOrphanOrders(positions)
+
 	// 3. 获取交易员的候选币种池
 	candidateCoins, err := at.getCandidateCoins()
 	if err != nil {
@@ -1650,4 +1653,47 @@ func (at *AutoTrader) ClearPeakPnLCache(symbol, side string) {
 
 	posKey := symbol + "_" + side
 	delete(at.peakPnLCache, posKey)
+}
+
+// cleanupOrphanOrders 清理孤儿订单（有挂单但无持仓的情况）
+// 这种情况通常发生在止损/止盈订单被触发后，持仓被平掉，但反向订单可能仍然存在
+func (at *AutoTrader) cleanupOrphanOrders(positions []map[string]interface{}) {
+	// 1. 构建持仓币种集合（只包含有实际持仓的币种）
+	positionSymbols := make(map[string]bool)
+	for _, pos := range positions {
+		symbol := pos["symbol"].(string)
+		posAmt, _ := pos["positionAmt"].(float64)
+		// 只记录有实际持仓的币种（数量不为0）
+		if posAmt != 0 {
+			positionSymbols[symbol] = true
+		}
+	}
+
+	// 2. 获取所有挂单
+	openOrders, err := at.trader.GetOpenOrders()
+	if err != nil {
+		log.Printf("⚠️  清理孤儿订单：获取挂单失败: %v（跳过清理）", err)
+		return
+	}
+
+	// 3. 检查每个有挂单的币种，如果无持仓则清理所有挂单
+	cleanedCount := 0
+	for symbol, orders := range openOrders {
+		// 如果该币种没有持仓，但有挂单，说明是孤儿订单
+		if !positionSymbols[symbol] && len(orders) > 0 {
+			log.Printf("🧹 检测到孤儿订单：%s 有 %d 个挂单但无持仓，开始清理...", symbol, len(orders))
+			
+			// 清理该币种的所有挂单
+			if err := at.trader.CancelAllOrders(symbol); err != nil {
+				log.Printf("  ⚠️  清理 %s 的孤儿订单失败: %v", symbol, err)
+			} else {
+				cleanedCount++
+				log.Printf("  ✓ 已清理 %s 的 %d 个孤儿订单", symbol, len(orders))
+			}
+		}
+	}
+
+	if cleanedCount > 0 {
+		log.Printf("🧹 孤儿订单清理完成：共清理 %d 个币种的挂单", cleanedCount)
+	}
 }
