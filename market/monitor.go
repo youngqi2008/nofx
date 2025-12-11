@@ -16,6 +16,10 @@ type WSMonitor struct {
 	featuresMap    sync.Map
 	alertsChan     chan Alert
 	klineDataMap3m sync.Map // 存储每个交易对的K线历史数据
+	klineDataMap5m sync.Map // 存储每个交易对的K线历史数据
+	klineDataMap15m sync.Map // 存储每个交易对的K线历史数据
+	klineDataMap30m sync.Map // 存储每个交易对的K线历史数据
+	klineDataMap1h sync.Map // 存储每个交易对的K线历史数据
 	klineDataMap4h sync.Map // 存储每个交易对的K线历史数据
 	tickerDataMap  sync.Map // 存储每个交易对的ticker数据
 	batchSize      int
@@ -32,7 +36,7 @@ type SymbolStats struct {
 }
 
 var WSMonitorCli *WSMonitor
-var subKlineTime = []string{"3m", "4h"} // 管理订阅流的K线周期
+var subKlineTime = []string{"3m", "5m", "15m", "30m", "1h", "4h"} // 管理订阅流的K线周期
 
 func NewWSMonitor(batchSize int) *WSMonitor {
 	WSMonitorCli = &WSMonitor{
@@ -89,25 +93,29 @@ func (m *WSMonitor) initializeHistoricalData() error {
 			defer wg.Done()
 			defer func() { <-semaphore }()
 
-			// 获取历史K线数据
-			klines, err := apiClient.GetKlines(s, "3m", 100)
-			if err != nil {
-				log.Printf("获取 %s 历史数据失败: %v", s, err)
-				return
+			// 获取所有时间周期的历史K线数据
+			timeframes := []struct {
+				duration string
+				dataMap  *sync.Map
+			}{
+				{"3m", &m.klineDataMap3m},
+				{"5m", &m.klineDataMap5m},
+				{"15m", &m.klineDataMap15m},
+				{"30m", &m.klineDataMap30m},
+				{"1h", &m.klineDataMap1h},
+				{"4h", &m.klineDataMap4h},
 			}
-			if len(klines) > 0 {
-				m.klineDataMap3m.Store(s, klines)
-				log.Printf("已加载 %s 的历史K线数据-3m: %d 条", s, len(klines))
-			}
-			// 获取历史K线数据
-			klines4h, err := apiClient.GetKlines(s, "4h", 100)
-			if err != nil {
-				log.Printf("获取 %s 历史数据失败: %v", s, err)
-				return
-			}
-			if len(klines4h) > 0 {
-				m.klineDataMap4h.Store(s, klines4h)
-				log.Printf("已加载 %s 的历史K线数据-4h: %d 条", s, len(klines4h))
+
+			for _, tf := range timeframes {
+				klines, err := apiClient.GetKlines(s, tf.duration, 100)
+				if err != nil {
+					log.Printf("获取 %s 历史数据失败 (%s): %v", s, tf.duration, err)
+					continue
+				}
+				if len(klines) > 0 {
+					tf.dataMap.Store(s, klines)
+					log.Printf("已加载 %s 的历史K线数据-%s: %d 条", s, tf.duration, len(klines))
+				}
 			}
 		}(symbol)
 	}
@@ -179,15 +187,22 @@ func (m *WSMonitor) handleKlineData(symbol string, ch <-chan []byte, _time strin
 }
 
 func (m *WSMonitor) getKlineDataMap(_time string) *sync.Map {
-	var klineDataMap *sync.Map
-	if _time == "3m" {
-		klineDataMap = &m.klineDataMap3m
-	} else if _time == "4h" {
-		klineDataMap = &m.klineDataMap4h
-	} else {
-		klineDataMap = &sync.Map{}
+	switch _time {
+	case "3m":
+		return &m.klineDataMap3m
+	case "5m":
+		return &m.klineDataMap5m
+	case "15m":
+		return &m.klineDataMap15m
+	case "30m":
+		return &m.klineDataMap30m
+	case "1h":
+		return &m.klineDataMap1h
+	case "4h":
+		return &m.klineDataMap4h
+	default:
+		return &sync.Map{}
 	}
-	return klineDataMap
 }
 func (m *WSMonitor) processKlineUpdate(symbol string, wsData KlineWSData, _time string) {
 	// 转换WebSocket数据为Kline结构

@@ -14,6 +14,10 @@ type Data struct {
 	OpenInterest      *OIData
 	FundingRate       float64
 	IntradaySeries    *IntradayData
+	Series5m          *TimeframeData  // 5分钟时间框架数据
+	Series15m         *TimeframeData  // 15分钟时间框架数据
+	Series30m         *TimeframeData  // 30分钟时间框架数据
+	Series1h          *TimeframeData  // 1小时时间框架数据
 	LongerTermContext *LongerTermData
 }
 
@@ -25,6 +29,17 @@ type OIData struct {
 
 // IntradayData 日内数据(3分钟间隔)
 type IntradayData struct {
+	MidPrices   []float64
+	EMA20Values []float64
+	MACDValues  []float64
+	RSI7Values  []float64
+	RSI14Values []float64
+	Volume      []float64
+	ATR14       float64
+}
+
+// TimeframeData 时间框架数据（用于5m、15m、30m、1h等）
+type TimeframeData struct {
 	MidPrices   []float64
 	EMA20Values []float64
 	MACDValues  []float64

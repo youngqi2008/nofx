@@ -26,7 +26,7 @@ var (
 
 // Get 获取指定代币的市场数据
 func Get(symbol string) (*Data, error) {
-	var klines3m, klines4h []Kline
+	var klines3m, klines5m, klines15m, klines30m, klines1h, klines4h []Kline
 	var err error
 	// 标准化symbol
 	symbol = Normalize(symbol)
@@ -40,6 +40,30 @@ func Get(symbol string) (*Data, error) {
 	if isStaleData(klines3m, symbol) {
 		log.Printf("⚠️  WARNING: %s detected stale data (consecutive price freeze), skipping symbol", symbol)
 		return nil, fmt.Errorf("%s data is stale, possible cache failure", symbol)
+	}
+
+	// 获取5分钟K线数据
+	klines5m, err = WSMonitorCli.GetCurrentKlines(symbol, "5m")
+	if err != nil {
+		log.Printf("警告: 获取5分钟K线失败: %v", err)
+	}
+
+	// 获取15分钟K线数据
+	klines15m, err = WSMonitorCli.GetCurrentKlines(symbol, "15m")
+	if err != nil {
+		log.Printf("警告: 获取15分钟K线失败: %v", err)
+	}
+
+	// 获取30分钟K线数据
+	klines30m, err = WSMonitorCli.GetCurrentKlines(symbol, "30m")
+	if err != nil {
+		log.Printf("警告: 获取30分钟K线失败: %v", err)
+	}
+
+	// 获取1小时K线数据
+	klines1h, err = WSMonitorCli.GetCurrentKlines(symbol, "1h")
+	if err != nil {
+		log.Printf("警告: 获取1小时K线失败: %v", err)
 	}
 
 	// 获取4小时K线数据 (最近10个)
@@ -94,6 +118,21 @@ func Get(symbol string) (*Data, error) {
 	// 计算日内系列数据
 	intradayData := calculateIntradaySeries(klines3m)
 
+	// 计算新时间周期的数据
+	var series5m, series15m, series30m, series1h *TimeframeData
+	if len(klines5m) > 0 {
+		series5m = calculateTimeframeData(klines5m)
+	}
+	if len(klines15m) > 0 {
+		series15m = calculateTimeframeData(klines15m)
+	}
+	if len(klines30m) > 0 {
+		series30m = calculateTimeframeData(klines30m)
+	}
+	if len(klines1h) > 0 {
+		series1h = calculateTimeframeData(klines1h)
+	}
+
 	// 计算长期数据
 	longerTermData := calculateLongerTermData(klines4h)
 
@@ -108,6 +147,10 @@ func Get(symbol string) (*Data, error) {
 		OpenInterest:      oiData,
 		FundingRate:       fundingRate,
 		IntradaySeries:    intradayData,
+		Series5m:          series5m,
+		Series15m:         series15m,
+		Series30m:         series30m,
+		Series1h:          series1h,
 		LongerTermContext: longerTermData,
 	}, nil
 }
@@ -224,6 +267,56 @@ func calculateATR(klines []Kline, period int) float64 {
 	}
 
 	return atr
+}
+
+// calculateTimeframeData 计算时间框架数据（通用函数，用于5m、15m、30m、1h等）
+func calculateTimeframeData(klines []Kline) *TimeframeData {
+	data := &TimeframeData{
+		MidPrices:   make([]float64, 0, 10),
+		EMA20Values: make([]float64, 0, 10),
+		MACDValues:  make([]float64, 0, 10),
+		RSI7Values:  make([]float64, 0, 10),
+		RSI14Values: make([]float64, 0, 10),
+		Volume:      make([]float64, 0, 10),
+	}
+
+	// 获取最近10个数据点
+	start := len(klines) - 10
+	if start < 0 {
+		start = 0
+	}
+
+	for i := start; i < len(klines); i++ {
+		data.MidPrices = append(data.MidPrices, klines[i].Close)
+		data.Volume = append(data.Volume, klines[i].Volume)
+
+		// 计算每个点的EMA20
+		if i >= 19 {
+			ema20 := calculateEMA(klines[:i+1], 20)
+			data.EMA20Values = append(data.EMA20Values, ema20)
+		}
+
+		// 计算每个点的MACD
+		if i >= 25 {
+			macd := calculateMACD(klines[:i+1])
+			data.MACDValues = append(data.MACDValues, macd)
+		}
+
+		// 计算每个点的RSI
+		if i >= 7 {
+			rsi7 := calculateRSI(klines[:i+1], 7)
+			data.RSI7Values = append(data.RSI7Values, rsi7)
+		}
+		if i >= 14 {
+			rsi14 := calculateRSI(klines[:i+1], 14)
+			data.RSI14Values = append(data.RSI14Values, rsi14)
+		}
+	}
+
+	// 计算ATR14
+	data.ATR14 = calculateATR(klines, 14)
+
+	return data
 }
 
 // calculateIntradaySeries 计算日内系列数据
@@ -460,6 +553,30 @@ func Format(data *Data) string {
 		sb.WriteString(fmt.Sprintf("3m ATR (14‑period): %.3f\n\n", data.IntradaySeries.ATR14))
 	}
 
+	// 输出5分钟时间框架数据
+	if data.Series5m != nil {
+		sb.WriteString("5-minute timeframe series (oldest → latest):\n\n")
+		formatTimeframeData(&sb, data.Series5m)
+	}
+
+	// 输出15分钟时间框架数据
+	if data.Series15m != nil {
+		sb.WriteString("15-minute timeframe series (oldest → latest):\n\n")
+		formatTimeframeData(&sb, data.Series15m)
+	}
+
+	// 输出30分钟时间框架数据
+	if data.Series30m != nil {
+		sb.WriteString("30-minute timeframe series (oldest → latest):\n\n")
+		formatTimeframeData(&sb, data.Series30m)
+	}
+
+	// 输出1小时时间框架数据
+	if data.Series1h != nil {
+		sb.WriteString("1-hour timeframe series (oldest → latest):\n\n")
+		formatTimeframeData(&sb, data.Series1h)
+	}
+
 	if data.LongerTermContext != nil {
 		sb.WriteString("Longer‑term context (4‑hour timeframe):\n\n")
 
@@ -482,6 +599,35 @@ func Format(data *Data) string {
 	}
 
 	return sb.String()
+}
+
+// formatTimeframeData 格式化时间框架数据输出
+func formatTimeframeData(sb *strings.Builder, data *TimeframeData) {
+	if len(data.MidPrices) > 0 {
+		sb.WriteString(fmt.Sprintf("Mid prices: %s\n\n", formatFloatSlice(data.MidPrices)))
+	}
+
+	if len(data.EMA20Values) > 0 {
+		sb.WriteString(fmt.Sprintf("EMA indicators (20‑period): %s\n\n", formatFloatSlice(data.EMA20Values)))
+	}
+
+	if len(data.MACDValues) > 0 {
+		sb.WriteString(fmt.Sprintf("MACD indicators: %s\n\n", formatFloatSlice(data.MACDValues)))
+	}
+
+	if len(data.RSI7Values) > 0 {
+		sb.WriteString(fmt.Sprintf("RSI indicators (7‑Period): %s\n\n", formatFloatSlice(data.RSI7Values)))
+	}
+
+	if len(data.RSI14Values) > 0 {
+		sb.WriteString(fmt.Sprintf("RSI indicators (14‑Period): %s\n\n", formatFloatSlice(data.RSI14Values)))
+	}
+
+	if len(data.Volume) > 0 {
+		sb.WriteString(fmt.Sprintf("Volume: %s\n\n", formatFloatSlice(data.Volume)))
+	}
+
+	sb.WriteString(fmt.Sprintf("ATR (14‑period): %.3f\n\n", data.ATR14))
 }
 
 // formatPriceWithDynamicPrecision 根据价格区间动态选择精度
