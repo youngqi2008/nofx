@@ -1017,8 +1017,18 @@ func (t *FuturesTrader) cancelAlgoOrder(symbol string, algoId int64) error {
 
 	// 检查响应体是否包含错误信息
 	bodyStr := string(body)
+	// Binance API 成功响应格式: {"algoId":...,"code":"200","msg":"success"}
+	// 错误响应格式: {"code":-1022,"msg":"Signature for this request is not valid."}
+	// 需要检查 code 是否为 "200" 或 200（成功），其他值才是错误
 	if strings.Contains(bodyStr, `"code"`) {
+		// 检查是否是成功响应
+		if strings.Contains(bodyStr, `"code":"200"`) || strings.Contains(bodyStr, `"code":200`) {
+			// 成功响应，返回 nil
+			return nil
+		}
+		// 检查是否包含错误消息
 		if strings.Contains(bodyStr, `"msg"`) {
+			// 这是错误响应
 			return fmt.Errorf("Binance API错误: %s", bodyStr)
 		}
 	}
