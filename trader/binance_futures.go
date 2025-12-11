@@ -917,9 +917,13 @@ func (t *FuturesTrader) queryAlgoOrders(symbol string) ([]map[string]interface{}
 	// 构建请求参数
 	params := url.Values{}
 	params.Set("symbol", symbol)
-	params.Set("timestamp", strconv.FormatInt(time.Now().UnixMilli(), 10))
+	// 使用当前时间戳（毫秒）
+	timestamp := time.Now().UnixMilli()
+	params.Set("timestamp", strconv.FormatInt(timestamp, 10))
+	// 添加recvWindow参数以提高兼容性
+	params.Set("recvWindow", "5000")
 
-	// 生成签名
+	// 生成签名（在添加signature之前）
 	queryString := params.Encode()
 	signature := t.generateSignature(queryString)
 	params.Set("signature", signature)
@@ -1088,9 +1092,13 @@ func (t *FuturesTrader) GetOpenOrders() (map[string][]map[string]interface{}, er
 func (t *FuturesTrader) queryAllAlgoOrders() ([]map[string]interface{}, error) {
 	// 构建请求参数（不指定symbol，查询所有条件订单）
 	params := url.Values{}
-	params.Set("timestamp", strconv.FormatInt(time.Now().UnixMilli(), 10))
+	// 使用当前时间戳（毫秒）
+	timestamp := time.Now().UnixMilli()
+	params.Set("timestamp", strconv.FormatInt(timestamp, 10))
+	// 添加recvWindow参数以提高兼容性
+	params.Set("recvWindow", "5000")
 
-	// 生成签名
+	// 生成签名（在添加signature之前）
 	queryString := params.Encode()
 	signature := t.generateSignature(queryString)
 	params.Set("signature", signature)
