@@ -1026,6 +1026,13 @@ func (t *FuturesTrader) cancelAlgoOrder(symbol string, algoId int64) error {
 			// 成功响应，返回 nil
 			return nil
 		}
+		// 检查是否是订单不存在的错误（-2011），这种情况应该视为成功
+		// 因为订单可能已经被触发、取消或过期
+		if strings.Contains(bodyStr, `"code":-2011`) || strings.Contains(bodyStr, `"-2011"`) {
+			// 订单不存在，视为成功（订单已经被取消或触发）
+			log.Printf("  ℹ 条件订单 %d 不存在（可能已被触发或取消）", algoId)
+			return nil
+		}
 		// 检查是否包含错误消息
 		if strings.Contains(bodyStr, `"msg"`) {
 			// 这是错误响应
