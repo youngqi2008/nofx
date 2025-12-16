@@ -95,6 +95,7 @@ type KlineResponse []interface{}
 type PriceTicker struct {
 	Symbol string `json:"symbol"`
 	Price  string `json:"price"`
+	Time   int64  `json:"time,omitempty"` // V2 API 新增字段：撮合引擎时间
 }
 
 type Ticker24hr struct {

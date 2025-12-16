@@ -124,7 +124,8 @@ func parseKline(kr KlineResponse) (Kline, error) {
 }
 
 func (c *APIClient) GetCurrentPrice(symbol string) (float64, error) {
-	url := fmt.Sprintf("%s/fapi/v1/ticker/price", baseURL)
+	// 使用 V2 API: https://developers.binance.com/docs/zh-CN/derivatives/usds-margined-futures/market-data/rest-api/Symbol-Price-Ticker-v2
+	url := fmt.Sprintf("%s/fapi/v2/ticker/price", baseURL)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return 0, err
