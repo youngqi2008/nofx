@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"nofx/hook"
@@ -819,8 +820,19 @@ func (t *FuturesTrader) SetTakeProfit(symbol string, positionSide string, quanti
 // createAlgoOrder 使用Algo Order API创建条件订单（止损/止盈）
 // 参考: https://developers.binance.com/docs/zh-CN/derivatives/usds-margined-futures/trade/rest-api/New-Algo-Order
 func (t *FuturesTrader) createAlgoOrder(symbol, side, positionSide, orderType, quantityStr string, stopPrice float64) error {
-	// 格式化触发价格
-	triggerPriceStr := fmt.Sprintf("%.8f", stopPrice)
+	// 格式化触发价格到正确的精度
+	roundedPrice, err := t.FormatPrice(symbol, stopPrice)
+	if err != nil {
+		return fmt.Errorf("格式化价格失败: %w", err)
+	}
+
+	// 获取价格精度用于格式化字符串
+	pricePrecision, err := t.GetPricePrecision(symbol)
+	if err != nil {
+		pricePrecision = 8 // 默认精度
+	}
+	format := fmt.Sprintf("%%.%df", pricePrecision)
+	triggerPriceStr := fmt.Sprintf(format, roundedPrice)
 
 	// 构建请求参数
 	params := url.Values{}
@@ -1255,16 +1267,66 @@ func trimTrailingZeros(s string) string {
 	return s
 }
 
+// GetPricePrecision 获取交易对的价格精度
+func (t *FuturesTrader) GetPricePrecision(symbol string) (int, error) {
+	exchangeInfo, err := t.client.NewExchangeInfoService().Do(context.Background())
+	if err != nil {
+		return 0, fmt.Errorf("获取交易规则失败: %w", err)
+	}
+
+	for _, s := range exchangeInfo.Symbols {
+		if s.Symbol == symbol {
+			// 从PRICE_FILTER filter获取精度
+			for _, filter := range s.Filters {
+				if filter["filterType"] == "PRICE_FILTER" {
+					tickSize, ok := filter["tickSize"].(string)
+					if ok {
+						precision := calculatePrecision(tickSize)
+						log.Printf("  %s 价格精度: %d (tickSize: %s)", symbol, precision, tickSize)
+						return precision, nil
+					}
+				}
+			}
+			// 如果没有找到PRICE_FILTER，尝试使用pricePrecision字段
+			if s.PricePrecision > 0 {
+				log.Printf("  %s 价格精度: %d (pricePrecision)", symbol, s.PricePrecision)
+				return s.PricePrecision, nil
+			}
+		}
+	}
+
+	log.Printf("  ⚠ %s 未找到价格精度信息，使用默认精度8", symbol)
+	return 8, nil // 默认精度为8
+}
+
+// FormatPrice 格式化价格到正确的精度
+func (t *FuturesTrader) FormatPrice(symbol string, price float64) (float64, error) {
+	precision, err := t.GetPricePrecision(symbol)
+	if err != nil {
+		// 如果获取失败，使用默认精度8
+		precision = 8
+	}
+
+	// 使用round函数四舍五入到指定精度
+	multiplier := math.Pow10(precision)
+	roundedPrice := math.Round(price*multiplier) / multiplier
+	return roundedPrice, nil
+}
+
 // FormatQuantity 格式化数量到正确的精度
 func (t *FuturesTrader) FormatQuantity(symbol string, quantity float64) (string, error) {
 	precision, err := t.GetSymbolPrecision(symbol)
 	if err != nil {
-		// 如果获取失败，使用默认格式
-		return fmt.Sprintf("%.3f", quantity), nil
+		// 如果获取失败，使用默认精度3，但仍然使用round函数
+		precision = 8
 	}
 
+	// 使用round函数四舍五入到指定精度
+	multiplier := math.Pow10(precision)
+	roundedQuantity := math.Round(quantity*multiplier) / multiplier
+
 	format := fmt.Sprintf("%%.%df", precision)
-	return fmt.Sprintf(format, quantity), nil
+	return fmt.Sprintf(format, roundedQuantity), nil
 }
 
 // 辅助函数
