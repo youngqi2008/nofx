@@ -1332,29 +1332,39 @@ func (t *FuturesTrader) FormatQuantity(symbol string, quantity float64) (string,
 // GetUserTrades 获取账户成交历史（过去24小时）
 // 参考: https://developers.binance.com/docs/zh-CN/derivatives/usds-margined-futures/trade/rest-api/Account-Trade-List
 // startTime和endTime是毫秒时间戳，如果都为0则获取最近7天的数据
+// symbols是可选参数，如果提供则查询这些symbols，否则查询持仓币种
 // 返回格式: map[symbol][]map[string]interface{}
-func (t *FuturesTrader) GetUserTrades(startTime, endTime int64) (map[string][]map[string]interface{}, error) {
+func (t *FuturesTrader) GetUserTrades(startTime, endTime int64, symbols ...string) (map[string][]map[string]interface{}, error) {
 	// 如果没有指定时间范围，使用过去24小时
 	if startTime == 0 && endTime == 0 {
 		endTime = time.Now().UnixMilli()
 		startTime = endTime - 24*60*60*1000 // 24小时前
 	}
 
-	// 首先获取所有持仓，以确定需要查询哪些交易对
-	positions, err := t.GetPositions()
-	if err != nil {
-		return nil, fmt.Errorf("获取持仓失败: %w", err)
-	}
-
-	// 收集需要查询的交易对（包括所有持仓币种）
+	// 收集需要查询的交易对
 	symbolSet := make(map[string]bool)
-	for _, pos := range positions {
-		if symbol, ok := pos["symbol"].(string); ok {
+	
+	// 如果提供了symbols参数，使用这些symbols
+	if len(symbols) > 0 {
+		for _, symbol := range symbols {
 			symbolSet[symbol] = true
+		}
+	} else {
+		// 否则，查询持仓币种
+		positions, err := t.GetPositions()
+		if err != nil {
+			return nil, fmt.Errorf("获取持仓失败: %w", err)
+		}
+
+		// 收集需要查询的交易对（包括所有持仓币种）
+		for _, pos := range positions {
+			if symbol, ok := pos["symbol"].(string); ok {
+				symbolSet[symbol] = true
+			}
 		}
 	}
 
-	// 如果没有任何持仓，返回空结果
+	// 如果没有任何交易对，返回空结果
 	if len(symbolSet) == 0 {
 		return make(map[string][]map[string]interface{}), nil
 	}

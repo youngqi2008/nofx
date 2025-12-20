@@ -125,7 +125,7 @@ func Get(symbol string) (*Data, error) {
 	intradayData := calculateIntradaySeries(klines3m)
 
 	// 计算新时间周期的数据
-	var series5m, series15m, series30m, series1h, series1d *TimeframeData
+	var series5m, series15m, series30m, series1h, series4h, series1d *TimeframeData
 	if len(klines5m) > 0 {
 		series5m = calculateTimeframeData(klines5m)
 	}
@@ -137,6 +137,9 @@ func Get(symbol string) (*Data, error) {
 	}
 	if len(klines1h) > 0 {
 		series1h = calculateTimeframeData(klines1h)
+	}
+	if len(klines4h) > 0 {
+		series4h = calculateTimeframeData(klines4h)
 	}
 	if len(klines1d) > 0 {
 		series1d = calculateTimeframeData(klines1d)
@@ -160,6 +163,7 @@ func Get(symbol string) (*Data, error) {
 		Series15m:         series15m,
 		Series30m:         series30m,
 		Series1h:          series1h,
+		Series4h:          series4h,
 		Series1d:          series1d,
 		LongerTermContext: longerTermData,
 	}, nil
@@ -585,6 +589,12 @@ func Format(data *Data) string {
 	if data.Series1h != nil {
 		sb.WriteString("1-hour timeframe series (oldest → latest):\n\n")
 		formatTimeframeData(&sb, data.Series1h)
+	}
+
+	// 输出4小时时间框架数据
+	if data.Series4h != nil {
+		sb.WriteString("4-hour timeframe series (oldest → latest):\n\n")
+		formatTimeframeData(&sb, data.Series4h)
 	}
 
 	// 输出1天时间框架数据

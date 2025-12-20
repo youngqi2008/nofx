@@ -1270,7 +1270,7 @@ func (t *AsterTrader) FormatQuantity(symbol string, quantity float64) (string, e
 
 // GetUserTrades 获取账户成交历史（Aster平台暂未实现）
 // TODO: 实现Aster平台的历史订单查询（如果平台支持的话）
-func (t *AsterTrader) GetUserTrades(startTime, endTime int64) (map[string][]map[string]interface{}, error) {
+func (t *AsterTrader) GetUserTrades(startTime, endTime int64, symbols ...string) (map[string][]map[string]interface{}, error) {
 	// Aster平台暂不支持历史订单查询，返回空结果
 	log.Printf("⚠️  Aster平台暂不支持历史订单查询")
 	return make(map[string][]map[string]interface{}), nil

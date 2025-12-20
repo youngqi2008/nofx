@@ -613,7 +613,28 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 	}
 
 	// 5.5. 获取过去24小时的历史订单数据
-	tradeHistory, err := at.trader.GetUserTrades(0, 0) // 0,0表示使用默认值（过去24小时）
+	// 合并持仓币种和候选币种，查询历史订单
+	symbolSet := make(map[string]bool)
+	// 添加持仓币种
+	for _, pos := range positionInfos {
+		symbolSet[pos.Symbol] = true
+	}
+	// 添加候选币种
+	for _, coin := range candidateCoins {
+		symbolSet[coin.Symbol] = true
+	}
+	
+	var tradeHistory map[string][]map[string]interface{}
+	if len(symbolSet) > 0 {
+		// 将symbolSet转换为slice
+		symbols := make([]string, 0, len(symbolSet))
+		for symbol := range symbolSet {
+			symbols = append(symbols, symbol)
+		}
+		tradeHistory, err = at.trader.GetUserTrades(0, 0, symbols...) // 0,0表示使用默认值（过去24小时）
+	} else {
+		tradeHistory = make(map[string][]map[string]interface{})
+	}
 	if err != nil {
 		log.Printf("⚠️  获取历史订单数据失败: %v", err)
 		// 不影响主流程，继续执行（但设置tradeHistory为空map）
@@ -630,13 +651,25 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 	}
 
 	// 5.6. 获取今天0点到现在的自然日交易数据
-	now := time.Now()
+	// 使用UTC时间，币安API使用UTC时间
+	nowUTC := time.Now().UTC()
 	// 获取今天0点的时间（UTC时间，币安API使用UTC）
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	todayStart := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
 	todayStartMs := todayStart.UnixMilli()
-	nowMs := now.UnixMilli()
+	nowMs := nowUTC.UnixMilli()
 	
-	todayTradeHistory, err := at.trader.GetUserTrades(todayStartMs, nowMs)
+	// 使用相同的symbolSet（持仓币种+候选币种）查询今天的交易数据
+	var todayTradeHistory map[string][]map[string]interface{}
+	if len(symbolSet) > 0 {
+		// 将symbolSet转换为slice
+		symbols := make([]string, 0, len(symbolSet))
+		for symbol := range symbolSet {
+			symbols = append(symbols, symbol)
+		}
+		todayTradeHistory, err = at.trader.GetUserTrades(todayStartMs, nowMs, symbols...)
+	} else {
+		todayTradeHistory = make(map[string][]map[string]interface{})
+	}
 	if err != nil {
 		log.Printf("⚠️  获取今天交易数据失败: %v", err)
 		// 不影响主流程，继续执行（但设置todayTradeHistory为空map）

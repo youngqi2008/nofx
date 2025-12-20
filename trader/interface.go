@@ -56,7 +56,8 @@ type Trader interface {
 	// GetUserTrades 获取账户成交历史（过去24小时）
 	// 返回格式: map[symbol][]map[string]interface{}
 	// 其中 trade 包含: symbol, orderId, price, qty, quoteQty, realizedPnl, side, positionSide, time 等字段
-	GetUserTrades(startTime, endTime int64) (map[string][]map[string]interface{}, error)
+	// symbols是可选参数，如果提供则查询这些symbols，否则查询持仓币种
+	GetUserTrades(startTime, endTime int64, symbols ...string) (map[string][]map[string]interface{}, error)
 
 	// FormatQuantity 格式化数量到正确的精度
 	FormatQuantity(symbol string, quantity float64) (string, error)

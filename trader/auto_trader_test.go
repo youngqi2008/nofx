@@ -1087,7 +1087,7 @@ func (m *MockTrader) GetOpenOrders() (map[string][]map[string]interface{}, error
 	return make(map[string][]map[string]interface{}), nil
 }
 
-func (m *MockTrader) GetUserTrades(startTime, endTime int64) (map[string][]map[string]interface{}, error) {
+func (m *MockTrader) GetUserTrades(startTime, endTime int64, symbols ...string) (map[string][]map[string]interface{}, error) {
 	// 返回空的历史订单列表（测试时通常不需要历史订单）
 	return make(map[string][]map[string]interface{}), nil
 }
