@@ -647,6 +647,8 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		}
 		if totalTrades > 0 {
 			log.Printf("📊 获取历史订单数据: %d个币种，共%d笔交易", len(tradeHistory), totalTrades)
+		} else {
+			log.Printf("ℹ️  过去24小时内，所有查询的币种（%d个）都没有交易记录", len(symbolSet))
 		}
 	}
 
@@ -682,6 +684,8 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		}
 		if totalTrades > 0 {
 			log.Printf("📊 获取今天交易数据: %d个币种，共%d笔交易", len(todayTradeHistory), totalTrades)
+		} else {
+			log.Printf("ℹ️  今天（UTC 0点到现在），所有查询的币种（%d个）都没有交易记录", len(symbolSet))
 		}
 	}
 

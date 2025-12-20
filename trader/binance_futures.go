@@ -1396,6 +1396,9 @@ func (t *FuturesTrader) GetUserTrades(startTime, endTime int64, symbols ...strin
 				result[s] = trades
 				mutex.Unlock()
 				log.Printf("✓ 获取 %s 的历史订单: %d 条", s, len(trades))
+			} else {
+				// 记录没有交易记录的情况（用于调试）
+				log.Printf("ℹ️  %s 在指定时间范围内没有交易记录", s)
 			}
 		}(symbol)
 	}
