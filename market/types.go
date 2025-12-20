@@ -18,7 +18,9 @@ type Data struct {
 	Series15m         *TimeframeData  // 15分钟时间框架数据
 	Series30m         *TimeframeData  // 30分钟时间框架数据
 	Series1h          *TimeframeData  // 1小时时间框架数据
+	Series1d          *TimeframeData  // 1天时间框架数据
 	LongerTermContext *LongerTermData
+	TradeHistory      []map[string]interface{} `json:"trade_history,omitempty"` // 过去24小时的历史订单数据
 }
 
 // OIData Open Interest数据

@@ -1329,6 +1329,150 @@ func (t *FuturesTrader) FormatQuantity(symbol string, quantity float64) (string,
 	return fmt.Sprintf(format, roundedQuantity), nil
 }
 
+// GetUserTrades 获取账户成交历史（过去24小时）
+// 参考: https://developers.binance.com/docs/zh-CN/derivatives/usds-margined-futures/trade/rest-api/Account-Trade-List
+// startTime和endTime是毫秒时间戳，如果都为0则获取最近7天的数据
+// 返回格式: map[symbol][]map[string]interface{}
+func (t *FuturesTrader) GetUserTrades(startTime, endTime int64) (map[string][]map[string]interface{}, error) {
+	// 如果没有指定时间范围，使用过去24小时
+	if startTime == 0 && endTime == 0 {
+		endTime = time.Now().UnixMilli()
+		startTime = endTime - 24*60*60*1000 // 24小时前
+	}
+
+	// 首先获取所有持仓，以确定需要查询哪些交易对
+	positions, err := t.GetPositions()
+	if err != nil {
+		return nil, fmt.Errorf("获取持仓失败: %w", err)
+	}
+
+	// 收集需要查询的交易对（包括所有持仓币种）
+	symbolSet := make(map[string]bool)
+	for _, pos := range positions {
+		if symbol, ok := pos["symbol"].(string); ok {
+			symbolSet[symbol] = true
+		}
+	}
+
+	// 如果没有任何持仓，返回空结果
+	if len(symbolSet) == 0 {
+		return make(map[string][]map[string]interface{}), nil
+	}
+
+	// 为每个交易对查询历史订单
+	result := make(map[string][]map[string]interface{})
+	var wg sync.WaitGroup
+	var mutex sync.Mutex
+
+	// 限制并发数，避免API限流
+	semaphore := make(chan struct{}, 5)
+
+	for symbol := range symbolSet {
+		wg.Add(1)
+		semaphore <- struct{}{}
+
+		go func(s string) {
+			defer wg.Done()
+			defer func() { <-semaphore }()
+
+			trades, err := t.getUserTradesForSymbol(s, startTime, endTime)
+			if err != nil {
+				log.Printf("⚠️ 获取 %s 的历史订单失败: %v", s, err)
+				return
+			}
+
+			if len(trades) > 0 {
+				mutex.Lock()
+				result[s] = trades
+				mutex.Unlock()
+				log.Printf("✓ 获取 %s 的历史订单: %d 条", s, len(trades))
+			}
+		}(symbol)
+	}
+
+	wg.Wait()
+	return result, nil
+}
+
+// getUserTradesForSymbol 获取指定交易对的成交历史
+func (t *FuturesTrader) getUserTradesForSymbol(symbol string, startTime, endTime int64) ([]map[string]interface{}, error) {
+	// 构建请求参数
+	params := url.Values{}
+	params.Set("symbol", symbol)
+	if startTime > 0 {
+		params.Set("startTime", strconv.FormatInt(startTime, 10))
+	}
+	if endTime > 0 {
+		params.Set("endTime", strconv.FormatInt(endTime, 10))
+	}
+	params.Set("limit", "1000") // 最大限制1000
+	params.Set("timestamp", strconv.FormatInt(time.Now().UnixMilli(), 10))
+	params.Set("recvWindow", "5000")
+
+	// 生成签名（在添加signature之前）
+	queryString := params.Encode()
+	signature := t.generateSignature(queryString)
+	params.Set("signature", signature)
+
+	// 构建请求URL
+	baseURL := "https://fapi.binance.com"
+	reqURL := fmt.Sprintf("%s/fapi/v1/userTrades?%s", baseURL, params.Encode())
+
+	// 创建HTTP请求
+	req, err := http.NewRequest("GET", reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	// 设置请求头
+	req.Header.Set("X-MBX-APIKEY", t.apiKey)
+
+	// 发送请求
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 读取响应
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	// 检查响应状态
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API错误 (状态码: %d): %s", resp.StatusCode, string(body))
+	}
+
+	// 解析JSON响应
+	var trades []map[string]interface{}
+	if err := json.Unmarshal(body, &trades); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	// 转换为统一的字段格式（确保数据类型正确）
+	result := make([]map[string]interface{}, 0, len(trades))
+	for _, trade := range trades {
+		normalizedTrade := make(map[string]interface{})
+		
+		// 复制所有字段
+		for k, v := range trade {
+			normalizedTrade[k] = v
+		}
+
+		// 确保关键字段存在
+		if _, ok := normalizedTrade["symbol"]; !ok {
+			normalizedTrade["symbol"] = symbol
+		}
+
+		result = append(result, normalizedTrade)
+	}
+
+	return result, nil
+}
+
 // 辅助函数
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && stringContains(s, substr)

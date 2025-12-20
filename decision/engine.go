@@ -81,10 +81,12 @@ type Context struct {
 	Positions       []PositionInfo          `json:"positions"`
 	CandidateCoins  []CandidateCoin         `json:"candidate_coins"`
 	MarketDataMap   map[string]*market.Data `json:"-"` // 不序列化，但内部使用
-	OITopDataMap    map[string]*OITopData   `json:"-"` // OI Top数据映射
-	Performance     interface{}             `json:"-"` // 历史表现分析（logger.PerformanceAnalysis）
-	BTCETHLeverage  int                     `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
-	AltcoinLeverage int                     `json:"-"` // 山寨币杠杆倍数（从配置读取）
+	OITopDataMap    map[string]*OITopData            `json:"-"` // OI Top数据映射
+	Performance        interface{}                      `json:"-"` // 历史表现分析（logger.PerformanceAnalysis）
+	TradeHistory       map[string][]map[string]interface{} `json:"-"` // 过去24小时的历史订单数据 (symbol -> trades)
+	TodayTradeHistory  map[string][]map[string]interface{} `json:"-"` // 今天0点到现在的自然日交易数据 (symbol -> trades)
+	BTCETHLeverage     int                              `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
+	AltcoinLeverage    int                              `json:"-"` // 山寨币杠杆倍数（从配置读取）
 }
 
 // Decision AI的交易决策
@@ -216,6 +218,13 @@ func fetchMarketDataForContext(ctx *Context) error {
 				log.Printf("⚠️  %s 持仓价值过低(%.2fM USD < %.1fM)，跳过此币种 [持仓量:%.0f × 价格:%.4f]",
 					symbol, oiValueInMillions, minOIThresholdMillions, data.OpenInterest.Latest, data.CurrentPrice)
 				continue
+			}
+		}
+
+		// 如果有历史交易数据，添加到Data中
+		if ctx.TradeHistory != nil {
+			if trades, ok := ctx.TradeHistory[symbol]; ok {
+				data.TradeHistory = trades
 			}
 		}
 
@@ -457,6 +466,74 @@ func buildUserPrompt(ctx *Context) string {
 				sb.WriteString(fmt.Sprintf("## 📊 夏普比率: %.2f\n\n", perfData.SharpeRatio))
 			}
 		}
+	}
+
+	// 历史交易数据（过去24小时）
+	if ctx.TradeHistory != nil && len(ctx.TradeHistory) > 0 {
+		sb.WriteString("## 📊 过去24小时历史交易数据\n\n")
+		
+		// 统计总交易数
+		totalTrades := 0
+		for _, trades := range ctx.TradeHistory {
+			totalTrades += len(trades)
+		}
+		
+		sb.WriteString(fmt.Sprintf("共 %d 个交易对，%d 笔交易\n\n", len(ctx.TradeHistory), totalTrades))
+		
+		// 为每个交易对输出历史交易数据的JSON
+		for symbol, trades := range ctx.TradeHistory {
+			if len(trades) == 0 {
+				continue
+			}
+			
+			sb.WriteString(fmt.Sprintf("### %s 历史交易 (%d笔)\n\n", symbol, len(trades)))
+			
+			// 将交易数据格式化为JSON
+			tradesJSON, err := json.MarshalIndent(trades, "", "  ")
+			if err != nil {
+				log.Printf("⚠️  格式化 %s 历史交易数据失败: %v", symbol, err)
+				sb.WriteString(fmt.Sprintf("```json\n[]\n```\n\n"))
+			} else {
+				sb.WriteString("```json\n")
+				sb.WriteString(string(tradesJSON))
+				sb.WriteString("\n```\n\n")
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// 今天0点到现在的自然日交易数据
+	if ctx.TodayTradeHistory != nil && len(ctx.TodayTradeHistory) > 0 {
+		sb.WriteString("## 📅 今天0点到现在自然日交易数据\n\n")
+		
+		// 统计总交易数
+		totalTrades := 0
+		for _, trades := range ctx.TodayTradeHistory {
+			totalTrades += len(trades)
+		}
+		
+		sb.WriteString(fmt.Sprintf("共 %d 个交易对，%d 笔交易\n\n", len(ctx.TodayTradeHistory), totalTrades))
+		
+		// 为每个交易对输出今天交易数据的JSON
+		for symbol, trades := range ctx.TodayTradeHistory {
+			if len(trades) == 0 {
+				continue
+			}
+			
+			sb.WriteString(fmt.Sprintf("### %s 今天交易 (%d笔)\n\n", symbol, len(trades)))
+			
+			// 将交易数据格式化为JSON
+			tradesJSON, err := json.MarshalIndent(trades, "", "  ")
+			if err != nil {
+				log.Printf("⚠️  格式化 %s 今天交易数据失败: %v", symbol, err)
+				sb.WriteString(fmt.Sprintf("```json\n[]\n```\n\n"))
+			} else {
+				sb.WriteString("```json\n")
+				sb.WriteString(string(tradesJSON))
+				sb.WriteString("\n```\n\n")
+			}
+		}
+		sb.WriteString("\n")
 	}
 
 	sb.WriteString("---\n\n")

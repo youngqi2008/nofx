@@ -21,6 +21,7 @@ type WSMonitor struct {
 	klineDataMap30m sync.Map // 存储每个交易对的K线历史数据
 	klineDataMap1h sync.Map // 存储每个交易对的K线历史数据
 	klineDataMap4h sync.Map // 存储每个交易对的K线历史数据
+	klineDataMap1d sync.Map // 存储每个交易对的K线历史数据
 	tickerDataMap  sync.Map // 存储每个交易对的ticker数据
 	batchSize      int
 	filterSymbols  sync.Map // 使用sync.Map来存储需要监控的币种和其状态
@@ -36,7 +37,7 @@ type SymbolStats struct {
 }
 
 var WSMonitorCli *WSMonitor
-var subKlineTime = []string{"3m", "5m", "15m", "30m", "1h", "4h"} // 管理订阅流的K线周期
+var subKlineTime = []string{"3m", "5m", "15m", "30m", "1h", "4h", "1d"} // 管理订阅流的K线周期
 
 func NewWSMonitor(batchSize int) *WSMonitor {
 	WSMonitorCli = &WSMonitor{
@@ -104,6 +105,7 @@ func (m *WSMonitor) initializeHistoricalData() error {
 				{"30m", &m.klineDataMap30m},
 				{"1h", &m.klineDataMap1h},
 				{"4h", &m.klineDataMap4h},
+				{"1d", &m.klineDataMap1d},
 			}
 
 			for _, tf := range timeframes {
@@ -200,6 +202,8 @@ func (m *WSMonitor) getKlineDataMap(_time string) *sync.Map {
 		return &m.klineDataMap1h
 	case "4h":
 		return &m.klineDataMap4h
+	case "1d":
+		return &m.klineDataMap1d
 	default:
 		return &sync.Map{}
 	}

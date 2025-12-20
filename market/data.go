@@ -26,7 +26,7 @@ var (
 
 // Get 获取指定代币的市场数据
 func Get(symbol string) (*Data, error) {
-	var klines3m, klines5m, klines15m, klines30m, klines1h, klines4h []Kline
+	var klines3m, klines5m, klines15m, klines30m, klines1h, klines4h, klines1d []Kline
 	var err error
 	// 标准化symbol
 	symbol = Normalize(symbol)
@@ -70,6 +70,12 @@ func Get(symbol string) (*Data, error) {
 	klines4h, err = WSMonitorCli.GetCurrentKlines(symbol, "4h") // 多获取用于计算指标
 	if err != nil {
 		return nil, fmt.Errorf("获取4小时K线失败: %v", err)
+	}
+
+	// 获取1天K线数据
+	klines1d, err = WSMonitorCli.GetCurrentKlines(symbol, "1d")
+	if err != nil {
+		log.Printf("警告: 获取1天K线失败: %v", err)
 	}
 
 	// 检查数据是否为空
@@ -119,7 +125,7 @@ func Get(symbol string) (*Data, error) {
 	intradayData := calculateIntradaySeries(klines3m)
 
 	// 计算新时间周期的数据
-	var series5m, series15m, series30m, series1h *TimeframeData
+	var series5m, series15m, series30m, series1h, series1d *TimeframeData
 	if len(klines5m) > 0 {
 		series5m = calculateTimeframeData(klines5m)
 	}
@@ -131,6 +137,9 @@ func Get(symbol string) (*Data, error) {
 	}
 	if len(klines1h) > 0 {
 		series1h = calculateTimeframeData(klines1h)
+	}
+	if len(klines1d) > 0 {
+		series1d = calculateTimeframeData(klines1d)
 	}
 
 	// 计算长期数据
@@ -151,6 +160,7 @@ func Get(symbol string) (*Data, error) {
 		Series15m:         series15m,
 		Series30m:         series30m,
 		Series1h:          series1h,
+		Series1d:          series1d,
 		LongerTermContext: longerTermData,
 	}, nil
 }
@@ -575,6 +585,12 @@ func Format(data *Data) string {
 	if data.Series1h != nil {
 		sb.WriteString("1-hour timeframe series (oldest → latest):\n\n")
 		formatTimeframeData(&sb, data.Series1h)
+	}
+
+	// 输出1天时间框架数据
+	if data.Series1d != nil {
+		sb.WriteString("1-day timeframe series (oldest → latest):\n\n")
+		formatTimeframeData(&sb, data.Series1d)
 	}
 
 	if data.LongerTermContext != nil {

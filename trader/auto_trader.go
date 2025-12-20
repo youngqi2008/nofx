@@ -612,6 +612,46 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		performance = nil
 	}
 
+	// 5.5. 获取过去24小时的历史订单数据
+	tradeHistory, err := at.trader.GetUserTrades(0, 0) // 0,0表示使用默认值（过去24小时）
+	if err != nil {
+		log.Printf("⚠️  获取历史订单数据失败: %v", err)
+		// 不影响主流程，继续执行（但设置tradeHistory为空map）
+		tradeHistory = make(map[string][]map[string]interface{})
+	} else {
+		// 统计总订单数
+		totalTrades := 0
+		for _, trades := range tradeHistory {
+			totalTrades += len(trades)
+		}
+		if totalTrades > 0 {
+			log.Printf("📊 获取历史订单数据: %d个币种，共%d笔交易", len(tradeHistory), totalTrades)
+		}
+	}
+
+	// 5.6. 获取今天0点到现在的自然日交易数据
+	now := time.Now()
+	// 获取今天0点的时间（UTC时间，币安API使用UTC）
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	todayStartMs := todayStart.UnixMilli()
+	nowMs := now.UnixMilli()
+	
+	todayTradeHistory, err := at.trader.GetUserTrades(todayStartMs, nowMs)
+	if err != nil {
+		log.Printf("⚠️  获取今天交易数据失败: %v", err)
+		// 不影响主流程，继续执行（但设置todayTradeHistory为空map）
+		todayTradeHistory = make(map[string][]map[string]interface{})
+	} else {
+		// 统计总订单数
+		totalTrades := 0
+		for _, trades := range todayTradeHistory {
+			totalTrades += len(trades)
+		}
+		if totalTrades > 0 {
+			log.Printf("📊 获取今天交易数据: %d个币种，共%d笔交易", len(todayTradeHistory), totalTrades)
+		}
+	}
+
 	// 6. 构建上下文
 	ctx := &decision.Context{
 		CurrentTime:     time.Now().Format("2006-01-02 15:04:05"),
@@ -629,9 +669,11 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 			MarginUsedPct:    marginUsedPct,
 			PositionCount:    len(positionInfos),
 		},
-		Positions:      positionInfos,
-		CandidateCoins: candidateCoins,
-		Performance:    performance, // 添加历史表现分析
+		Positions:         positionInfos,
+		CandidateCoins:     candidateCoins,
+		Performance:       performance,        // 添加历史表现分析
+		TradeHistory:       tradeHistory,      // 添加过去24小时历史订单数据
+		TodayTradeHistory: todayTradeHistory, // 添加今天0点到现在的交易数据
 	}
 
 	return ctx, nil

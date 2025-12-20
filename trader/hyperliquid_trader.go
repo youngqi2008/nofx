@@ -940,3 +940,11 @@ func absFloat(x float64) float64 {
 	}
 	return x
 }
+
+// GetUserTrades 获取账户成交历史（Hyperliquid平台暂未实现）
+// TODO: 实现Hyperliquid平台的历史订单查询
+func (t *HyperliquidTrader) GetUserTrades(startTime, endTime int64) (map[string][]map[string]interface{}, error) {
+	// Hyperliquid平台暂不支持历史订单查询，返回空结果
+	log.Printf("⚠️  Hyperliquid平台暂不支持历史订单查询")
+	return make(map[string][]map[string]interface{}), nil
+}
