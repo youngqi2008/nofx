@@ -582,6 +582,9 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		}
 	}
 
+	// 2.5. 清理孤儿订单（有挂单但无持仓的情况，通常是止损/止盈触发后残留的订单）
+	at.cleanupOrphanOrders(positions)
+
 	// 3. 获取交易员的候选币种池
 	candidateCoins, err := at.getCandidateCoins()
 	if err != nil {
@@ -609,6 +612,89 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		performance = nil
 	}
 
+	// 5.5. 获取过去24小时的历史订单数据
+	// 合并持仓币种和候选币种，查询历史订单
+	symbolSet := make(map[string]bool)
+	// 添加持仓币种
+	for _, pos := range positionInfos {
+		symbolSet[pos.Symbol] = true
+	}
+	// 添加候选币种
+	for _, coin := range candidateCoins {
+		symbolSet[coin.Symbol] = true
+	}
+	
+	var tradeHistory map[string][]map[string]interface{}
+	if len(symbolSet) > 0 {
+		// 将symbolSet转换为slice
+		symbols := make([]string, 0, len(symbolSet))
+		for symbol := range symbolSet {
+			symbols = append(symbols, symbol)
+		}
+		tradeHistory, err = at.trader.GetUserTrades(0, 0, symbols...) // 0,0表示使用默认值（过去24小时）
+	} else {
+		tradeHistory = make(map[string][]map[string]interface{})
+	}
+	if err != nil {
+		log.Printf("⚠️  获取历史订单数据失败: %v", err)
+		// 不影响主流程，继续执行（但设置tradeHistory为空map）
+		tradeHistory = make(map[string][]map[string]interface{})
+	} else {
+		// 统计总订单数
+		totalTrades := 0
+		for _, trades := range tradeHistory {
+			totalTrades += len(trades)
+		}
+		if totalTrades > 0 {
+			log.Printf("📊 获取历史订单数据: %d个币种，共%d笔交易", len(tradeHistory), totalTrades)
+		} else {
+			log.Printf("ℹ️  过去24小时内，所有查询的币种（%d个）都没有交易记录", len(symbolSet))
+		}
+	}
+
+	// 5.6. 获取今天0点到现在的自然日交易数据
+	// 使用UTC时间，币安API使用UTC时间
+	nowUTC := time.Now().UTC()
+	// 获取今天0点的时间（UTC时间，币安API使用UTC）
+	todayStart := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
+	todayStartMs := todayStart.UnixMilli()
+	nowMs := nowUTC.UnixMilli()
+	
+	// 使用相同的symbolSet（持仓币种+候选币种）查询今天的交易数据
+	var todayTradeHistory map[string][]map[string]interface{}
+	if len(symbolSet) > 0 {
+		// 将symbolSet转换为slice
+		symbols := make([]string, 0, len(symbolSet))
+		for symbol := range symbolSet {
+			symbols = append(symbols, symbol)
+		}
+		todayTradeHistory, err = at.trader.GetUserTrades(todayStartMs, nowMs, symbols...)
+	} else {
+		todayTradeHistory = make(map[string][]map[string]interface{})
+	}
+	if err != nil {
+		log.Printf("⚠️  获取今天交易数据失败: %v", err)
+		// 不影响主流程，继续执行（但设置todayTradeHistory为空map）
+		todayTradeHistory = make(map[string][]map[string]interface{})
+	} else {
+		// 统计总订单数
+		totalTrades := 0
+		for _, trades := range todayTradeHistory {
+			totalTrades += len(trades)
+		}
+		if totalTrades > 0 {
+			log.Printf("📊 获取今天交易数据: %d个币种，共%d笔交易", len(todayTradeHistory), totalTrades)
+		} else {
+			log.Printf("ℹ️  今天（UTC 0点到现在），所有查询的币种（%d个）都没有交易记录", len(symbolSet))
+		}
+	}
+
+	// 5.7. 计算交易统计指标
+	// 计算过去24小时的交易统计
+	tradeStats24H := decision.CalculateTradeStatistics(tradeHistory)
+	// 计算当日的交易统计
+	todayTradeStats := decision.CalculateTradeStatistics(todayTradeHistory)
+	
 	// 6. 构建上下文
 	ctx := &decision.Context{
 		CurrentTime:     time.Now().Format("2006-01-02 15:04:05"),
@@ -626,9 +712,13 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 			MarginUsedPct:    marginUsedPct,
 			PositionCount:    len(positionInfos),
 		},
-		Positions:      positionInfos,
-		CandidateCoins: candidateCoins,
-		Performance:    performance, // 添加历史表现分析
+		Positions:         positionInfos,
+		CandidateCoins:     candidateCoins,
+		Performance:       performance,        // 添加历史表现分析
+		TradeHistory:       tradeHistory,      // 添加过去24小时历史订单数据
+		TodayTradeHistory: todayTradeHistory, // 添加今天0点到现在的交易数据
+		TradeStats24H:      tradeStats24H,     // 过去24小时交易统计
+		TodayTradeStats:    todayTradeStats,   // 当日自然日交易统计
 	}
 
 	return ctx, nil
@@ -1650,4 +1740,47 @@ func (at *AutoTrader) ClearPeakPnLCache(symbol, side string) {
 
 	posKey := symbol + "_" + side
 	delete(at.peakPnLCache, posKey)
+}
+
+// cleanupOrphanOrders 清理孤儿订单（有挂单但无持仓的情况）
+// 这种情况通常发生在止损/止盈订单被触发后，持仓被平掉，但反向订单可能仍然存在
+func (at *AutoTrader) cleanupOrphanOrders(positions []map[string]interface{}) {
+	// 1. 构建持仓币种集合（只包含有实际持仓的币种）
+	positionSymbols := make(map[string]bool)
+	for _, pos := range positions {
+		symbol := pos["symbol"].(string)
+		posAmt, _ := pos["positionAmt"].(float64)
+		// 只记录有实际持仓的币种（数量不为0）
+		if posAmt != 0 {
+			positionSymbols[symbol] = true
+		}
+	}
+
+	// 2. 获取所有挂单
+	openOrders, err := at.trader.GetOpenOrders()
+	if err != nil {
+		log.Printf("⚠️  清理孤儿订单：获取挂单失败: %v（跳过清理）", err)
+		return
+	}
+
+	// 3. 检查每个有挂单的币种，如果无持仓则清理所有挂单
+	cleanedCount := 0
+	for symbol, orders := range openOrders {
+		// 如果该币种没有持仓，但有挂单，说明是孤儿订单
+		if !positionSymbols[symbol] && len(orders) > 0 {
+			log.Printf("🧹 检测到孤儿订单：%s 有 %d 个挂单但无持仓，开始清理...", symbol, len(orders))
+			
+			// 清理该币种的所有挂单
+			if err := at.trader.CancelAllOrders(symbol); err != nil {
+				log.Printf("  ⚠️  清理 %s 的孤儿订单失败: %v", symbol, err)
+			} else {
+				cleanedCount++
+				log.Printf("  ✓ 已清理 %s 的 %d 个孤儿订单", symbol, len(orders))
+			}
+		}
+	}
+
+	if cleanedCount > 0 {
+		log.Printf("🧹 孤儿订单清理完成：共清理 %d 个币种的挂单", cleanedCount)
+	}
 }
