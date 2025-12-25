@@ -9,6 +9,7 @@ import (
 	"nofx/mcp"
 	"nofx/pool"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -72,6 +73,17 @@ type OITopData struct {
 	NetShort          float64 // 净空仓
 }
 
+// TradeStatistics 交易统计指标
+type TradeStatistics struct {
+	BuyCount      int     `json:"buy_count"`       // 买入次数
+	SellCount     int     `json:"sell_count"`      // 卖出次数
+	ProfitCount   int     `json:"profit_count"`    // 盈利次数
+	LossCount     int     `json:"loss_count"`      // 亏损次数
+	TotalProfit   float64 `json:"total_profit"`    // 盈利总金额
+	TotalLoss     float64 `json:"total_loss"`      // 亏损总金额
+	NetPnL        float64 `json:"net_pnl"`         // 净盈亏（盈利总金额 + 亏损总金额）
+}
+
 // Context 交易上下文（传递给AI的完整信息）
 type Context struct {
 	CurrentTime     string                  `json:"current_time"`
@@ -85,6 +97,8 @@ type Context struct {
 	Performance        interface{}                      `json:"-"` // 历史表现分析（logger.PerformanceAnalysis）
 	TradeHistory       map[string][]map[string]interface{} `json:"-"` // 过去24小时的历史订单数据 (symbol -> trades)
 	TodayTradeHistory  map[string][]map[string]interface{} `json:"-"` // 今天0点到现在的自然日交易数据 (symbol -> trades)
+	TradeStats24H      *TradeStatistics                  `json:"-"` // 过去24小时交易统计
+	TodayTradeStats    *TradeStatistics                  `json:"-"` // 当日自然日交易统计
 	BTCETHLeverage     int                              `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
 	AltcoinLeverage    int                              `json:"-"` // 山寨币杠杆倍数（从配置读取）
 }
@@ -120,6 +134,56 @@ type FullDecision struct {
 	Timestamp    time.Time  `json:"timestamp"`
 	// AIRequestDurationMs 记录 AI API 调用耗时（毫秒）方便排查延迟问题
 	AIRequestDurationMs int64 `json:"ai_request_duration_ms,omitempty"`
+}
+
+// CalculateTradeStatistics 计算交易统计指标
+// 从交易记录中统计买入次数、卖出次数、盈利次数、亏损次数、盈利总金额、亏损总金额
+func CalculateTradeStatistics(tradeHistory map[string][]map[string]interface{}) *TradeStatistics {
+	stats := &TradeStatistics{}
+	
+	// 遍历所有交易对的交易记录
+	for _, trades := range tradeHistory {
+		for _, trade := range trades {
+			// 统计买入/卖出次数
+			if side, ok := trade["side"].(string); ok {
+				if side == "BUY" {
+					stats.BuyCount++
+				} else if side == "SELL" {
+					stats.SellCount++
+				}
+			}
+			
+			// 统计盈利/亏损次数和金额
+			// realizedPnl可能是字符串或数字类型
+			var realizedPnl float64
+			if pnl, ok := trade["realizedPnl"].(string); ok {
+				// 如果是字符串，尝试转换为float64
+				if val, err := strconv.ParseFloat(pnl, 64); err == nil {
+					realizedPnl = val
+				}
+			} else if pnl, ok := trade["realizedPnl"].(float64); ok {
+				realizedPnl = pnl
+			} else if pnl, ok := trade["realizedPnl"].(int); ok {
+				realizedPnl = float64(pnl)
+			} else if pnl, ok := trade["realizedPnl"].(int64); ok {
+				realizedPnl = float64(pnl)
+			}
+			
+			// 根据realizedPnl判断盈利或亏损
+			if realizedPnl > 0 {
+				stats.ProfitCount++
+				stats.TotalProfit += realizedPnl
+			} else if realizedPnl < 0 {
+				stats.LossCount++
+				stats.TotalLoss += realizedPnl // TotalLoss是负数或0
+			}
+		}
+	}
+	
+	// 计算净盈亏
+	stats.NetPnL = stats.TotalProfit + stats.TotalLoss
+	
+	return stats
 }
 
 // GetFullDecision 获取AI的完整交易决策（批量分析所有币种和持仓）
@@ -480,6 +544,18 @@ func buildUserPrompt(ctx *Context) string {
 		
 		sb.WriteString(fmt.Sprintf("共 %d 个交易对，%d 笔交易\n\n", len(ctx.TradeHistory), totalTrades))
 		
+		// 显示交易统计指标
+		if ctx.TradeStats24H != nil {
+			sb.WriteString("### 📈 交易统计指标\n\n")
+			sb.WriteString(fmt.Sprintf("- **买入次数**: %d\n", ctx.TradeStats24H.BuyCount))
+			sb.WriteString(fmt.Sprintf("- **卖出次数**: %d\n", ctx.TradeStats24H.SellCount))
+			sb.WriteString(fmt.Sprintf("- **盈利次数**: %d\n", ctx.TradeStats24H.ProfitCount))
+			sb.WriteString(fmt.Sprintf("- **亏损次数**: %d\n", ctx.TradeStats24H.LossCount))
+			sb.WriteString(fmt.Sprintf("- **盈利总金额**: %.2f USDT\n", ctx.TradeStats24H.TotalProfit))
+			sb.WriteString(fmt.Sprintf("- **亏损总金额**: %.2f USDT\n", ctx.TradeStats24H.TotalLoss))
+			sb.WriteString(fmt.Sprintf("- **净盈亏**: %.2f USDT\n\n", ctx.TradeStats24H.NetPnL))
+		}
+		
 		// 为每个交易对输出历史交易数据的JSON
 		for symbol, trades := range ctx.TradeHistory {
 			if len(trades) == 0 {
@@ -513,6 +589,18 @@ func buildUserPrompt(ctx *Context) string {
 		}
 		
 		sb.WriteString(fmt.Sprintf("共 %d 个交易对，%d 笔交易\n\n", len(ctx.TodayTradeHistory), totalTrades))
+		
+		// 显示交易统计指标
+		if ctx.TodayTradeStats != nil {
+			sb.WriteString("### 📈 交易统计指标\n\n")
+			sb.WriteString(fmt.Sprintf("- **买入次数**: %d\n", ctx.TodayTradeStats.BuyCount))
+			sb.WriteString(fmt.Sprintf("- **卖出次数**: %d\n", ctx.TodayTradeStats.SellCount))
+			sb.WriteString(fmt.Sprintf("- **盈利次数**: %d\n", ctx.TodayTradeStats.ProfitCount))
+			sb.WriteString(fmt.Sprintf("- **亏损次数**: %d\n", ctx.TodayTradeStats.LossCount))
+			sb.WriteString(fmt.Sprintf("- **盈利总金额**: %.2f USDT\n", ctx.TodayTradeStats.TotalProfit))
+			sb.WriteString(fmt.Sprintf("- **亏损总金额**: %.2f USDT\n", ctx.TodayTradeStats.TotalLoss))
+			sb.WriteString(fmt.Sprintf("- **净盈亏**: %.2f USDT\n\n", ctx.TodayTradeStats.NetPnL))
+		}
 		
 		// 为每个交易对输出今天交易数据的JSON
 		for symbol, trades := range ctx.TodayTradeHistory {

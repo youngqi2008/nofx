@@ -689,6 +689,12 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		}
 	}
 
+	// 5.7. 计算交易统计指标
+	// 计算过去24小时的交易统计
+	tradeStats24H := decision.CalculateTradeStatistics(tradeHistory)
+	// 计算当日的交易统计
+	todayTradeStats := decision.CalculateTradeStatistics(todayTradeHistory)
+	
 	// 6. 构建上下文
 	ctx := &decision.Context{
 		CurrentTime:     time.Now().Format("2006-01-02 15:04:05"),
@@ -711,6 +717,8 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		Performance:       performance,        // 添加历史表现分析
 		TradeHistory:       tradeHistory,      // 添加过去24小时历史订单数据
 		TodayTradeHistory: todayTradeHistory, // 添加今天0点到现在的交易数据
+		TradeStats24H:      tradeStats24H,     // 过去24小时交易统计
+		TodayTradeStats:    todayTradeStats,   // 当日自然日交易统计
 	}
 
 	return ctx, nil
