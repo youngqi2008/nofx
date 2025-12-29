@@ -188,11 +188,12 @@ func CalculateTradeStatistics(tradeHistory map[string][]map[string]interface{}) 
 
 // GetFullDecision 获取AI的完整交易决策（批量分析所有币种和持仓）
 func GetFullDecision(ctx *Context, mcpClient mcp.AIClient) (*FullDecision, error) {
-	return GetFullDecisionWithCustomPrompt(ctx, mcpClient, "", false, "")
+	return GetFullDecisionWithCustomPrompt(ctx, mcpClient, "", false, "", nil)
 }
 
 // GetFullDecisionWithCustomPrompt 获取AI的完整交易决策（支持自定义prompt和模板选择）
-func GetFullDecisionWithCustomPrompt(ctx *Context, mcpClient mcp.AIClient, customPrompt string, overrideBase bool, templateName string) (*FullDecision, error) {
+// previousDecisionRecord 可选参数：上一轮的决策记录，用于作为上下文加载到用户提示词中
+func GetFullDecisionWithCustomPrompt(ctx *Context, mcpClient mcp.AIClient, customPrompt string, overrideBase bool, templateName string, previousDecisionRecord interface{}) (*FullDecision, error) {
 	// 1. 为所有币种获取市场数据
 	if err := fetchMarketDataForContext(ctx); err != nil {
 		return nil, fmt.Errorf("获取市场数据失败: %w", err)
@@ -200,7 +201,7 @@ func GetFullDecisionWithCustomPrompt(ctx *Context, mcpClient mcp.AIClient, custo
 
 	// 2. 构建 System Prompt（固定规则）和 User Prompt（动态数据）
 	systemPrompt := buildSystemPromptWithCustom(ctx.Account.TotalEquity, ctx.BTCETHLeverage, ctx.AltcoinLeverage, customPrompt, overrideBase, templateName)
-	userPrompt := buildUserPrompt(ctx)
+	userPrompt := buildUserPrompt(ctx, previousDecisionRecord)
 
 	// 3. 调用AI API（使用 system + user prompt）
 	aiCallStart := time.Now()
@@ -435,7 +436,8 @@ func buildSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverage in
 }
 
 // buildUserPrompt 构建 User Prompt（动态数据）
-func buildUserPrompt(ctx *Context) string {
+// previousDecisionRecord 可选参数：上一轮的决策记录，用于作为上下文加载到用户提示词中
+func buildUserPrompt(ctx *Context, previousDecisionRecord interface{}) string {
 	var sb strings.Builder
 
 	// 系统状态
@@ -622,6 +624,96 @@ func buildUserPrompt(ctx *Context) string {
 			}
 		}
 		sb.WriteString("\n")
+	}
+
+	// 上一轮决策上下文（如果提供）
+	if previousDecisionRecord != nil {
+		sb.WriteString("## 🔄 上一轮决策上下文\n\n")
+		
+		// 尝试从决策记录中提取信息
+		// 使用JSON序列化/反序列化来通用处理
+		jsonData, err := json.Marshal(previousDecisionRecord)
+		if err == nil {
+			var recordMap map[string]interface{}
+			if err := json.Unmarshal(jsonData, &recordMap); err == nil {
+				// 提取周期号
+				if cycleNum, ok := recordMap["cycle_number"].(float64); ok {
+					sb.WriteString(fmt.Sprintf("**周期 #%.0f**", int(cycleNum)))
+					// 提取时间戳（支持多种格式）
+					if timestampVal, exists := recordMap["timestamp"]; exists {
+						var timestampStr string
+						if ts, ok := timestampVal.(string); ok {
+							timestampStr = ts
+						} else if ts, ok := timestampVal.(float64); ok {
+							// Unix时间戳（秒）
+							t := time.Unix(int64(ts), 0)
+							timestampStr = t.Format(time.RFC3339)
+						}
+						
+						if timestampStr != "" {
+							// 尝试解析RFC3339格式
+							if t, err := time.Parse(time.RFC3339, timestampStr); err == nil {
+								sb.WriteString(fmt.Sprintf(" (时间: %s)", t.Format("2006-01-02 15:04:05")))
+							} else {
+								// 尝试其他常见格式
+								formats := []string{
+									"2006-01-02 15:04:05",
+									"2006-01-02T15:04:05Z07:00",
+									"2006-01-02T15:04:05",
+								}
+								parsed := false
+								for _, format := range formats {
+									if t, err := time.Parse(format, timestampStr); err == nil {
+										sb.WriteString(fmt.Sprintf(" (时间: %s)", t.Format("2006-01-02 15:04:05")))
+										parsed = true
+										break
+									}
+								}
+								if !parsed {
+									// 如果无法解析，直接显示原始字符串（截断）
+									if len(timestampStr) > 19 {
+										timestampStr = timestampStr[:19]
+									}
+									sb.WriteString(fmt.Sprintf(" (时间: %s)", timestampStr))
+								}
+							}
+						}
+					}
+					sb.WriteString("\n\n")
+				}
+				
+				// 显示思维链（如果存在）
+				if cotTrace, ok := recordMap["cot_trace"].(string); ok && cotTrace != "" {
+					// 限制思维链长度，避免提示词过长
+					maxCoTLength := 2000
+					cotDisplay := cotTrace
+					if len(cotDisplay) > maxCoTLength {
+						cotDisplay = cotDisplay[:maxCoTLength] + "\n\n... (思维链已截断，仅显示前2000字符)"
+					}
+					sb.WriteString("### 上一轮思维链\n\n")
+					sb.WriteString(cotDisplay)
+					sb.WriteString("\n\n")
+				}
+				
+				// 显示决策JSON（如果存在）
+				if decisionJSON, ok := recordMap["decision_json"].(string); ok && decisionJSON != "" {
+					// 限制决策JSON长度
+					maxJSONLength := 1000
+					jsonDisplay := decisionJSON
+					if len(jsonDisplay) > maxJSONLength {
+						jsonDisplay = jsonDisplay[:maxJSONLength] + "\n... (决策JSON已截断，仅显示前1000字符)"
+					}
+					sb.WriteString("### 上一轮决策摘要\n\n")
+					sb.WriteString("```json\n")
+					sb.WriteString(jsonDisplay)
+					sb.WriteString("\n```\n\n")
+				}
+			}
+		}
+		
+		sb.WriteString("---\n\n")
+		sb.WriteString("**注意：以上是上一轮的决策上下文，请参考但不要完全依赖，需要结合当前市场情况做出新的决策。**\n\n")
+		sb.WriteString("---\n\n")
 	}
 
 	sb.WriteString("---\n\n")
@@ -1012,3 +1104,4 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 
 	return nil
 }
+

@@ -360,9 +360,28 @@ func (at *AutoTrader) runCycle() error {
 	log.Printf("📊 账户净值: %.2f USDT | 可用: %.2f USDT | 持仓: %d",
 		ctx.Account.TotalEquity, ctx.Account.AvailableBalance, ctx.Account.PositionCount)
 
-	// 5. 调用AI获取完整决策
+	// 5. 获取上一轮决策记录（作为上下文）- 仅当上一轮成功执行时才加载
+	var previousDecisionRecord interface{} = nil
+	if at.callCount > 1 {
+		// 获取最近1条记录（上一轮）
+		previousRecords, err := at.decisionLogger.GetLatestRecords(1)
+		if err == nil && len(previousRecords) > 0 {
+			previousRecord := previousRecords[0]
+			// 检查上一轮是否成功执行
+			if previousRecord.Success {
+				previousDecisionRecord = previousRecord
+				log.Printf("📋 已加载上一轮决策上下文（周期 #%d，执行成功）", previousRecord.CycleNumber)
+			} else {
+				log.Printf("⏭️  跳过上一轮决策上下文（周期 #%d，执行失败）", previousRecord.CycleNumber)
+			}
+		} else if err != nil {
+			log.Printf("⚠️  获取上一轮决策记录失败: %v", err)
+		}
+	}
+
+	// 6. 调用AI获取完整决策
 	log.Printf("🤖 正在请求AI分析并决策... [模板: %s]", at.systemPromptTemplate)
-	decision, err := decision.GetFullDecisionWithCustomPrompt(ctx, at.mcpClient, at.customPrompt, at.overrideBasePrompt, at.systemPromptTemplate)
+	decision, err := decision.GetFullDecisionWithCustomPrompt(ctx, at.mcpClient, at.customPrompt, at.overrideBasePrompt, at.systemPromptTemplate, previousDecisionRecord)
 
 	if decision != nil && decision.AIRequestDurationMs > 0 {
 		record.AIRequestDurationMs = decision.AIRequestDurationMs
@@ -1784,3 +1803,4 @@ func (at *AutoTrader) cleanupOrphanOrders(positions []map[string]interface{}) {
 		log.Printf("🧹 孤儿订单清理完成：共清理 %d 个币种的挂单", cleanedCount)
 	}
 }
+
