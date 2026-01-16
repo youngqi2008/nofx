@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef, type FormEvent } from 'react'
 import useSWR from 'swr'
 import { motion, AnimatePresence } from 'framer-motion'
-import { createChart, ColorType, CrosshairMode, CandlestickSeries, createSeriesMarkers, type IChartApi, type ISeriesApi, type CandlestickData, type UTCTimestamp, type SeriesMarker } from 'lightweight-charts'
+import { createChart, ColorType, CrosshairMode, CandlestickSeries, LineSeries, createSeriesMarkers, type IChartApi, type ISeriesApi, type CandlestickData, type LineData, type UTCTimestamp, type SeriesMarker, type Time } from 'lightweight-charts'
 import {
   Play,
   Pause,
@@ -29,16 +29,6 @@ import {
   CandlestickChart as CandlestickIcon,
 } from 'lucide-react'
 import { DeepVoidBackground } from './DeepVoidBackground'
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ReferenceDot,
-} from 'recharts'
 import { api } from '../lib/api'
 import { useLanguage } from '../contexts/LanguageContext'
 import { t } from '../i18n/translations'
@@ -176,102 +166,171 @@ function ProgressRing({ progress, size = 120 }: { progress: number; size?: numbe
   )
 }
 
-// Equity Chart Component using Recharts
+// Equity Chart Component using lightweight-charts (for time axis synchronization)
 function BacktestChart({
   equity,
   trades,
+  onTimeRangeChange,
+  syncTimeRange,
 }: {
   equity: BacktestEquityPoint[]
   trades: BacktestTradeEvent[]
+  onTimeRangeChange?: (range: { from: number; to: number } | null) => void
+  syncTimeRange?: { from: number; to: number } | null
 }) {
-  const chartData = useMemo(() => {
+  const chartContainerRef = useRef<HTMLDivElement>(null)
+  const chartRef = useRef<IChartApi | null>(null)
+  const lineSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const isSyncingRef = useRef(false)
+
+  // Prepare equity data for lightweight-charts
+  const equityData = useMemo(() => {
     return equity.map((point) => ({
-      time: new Date(point.ts).toLocaleString(),
-      ts: point.ts,
-      equity: point.equity,
-      pnl_pct: point.pnl_pct,
-    }))
+      time: Math.floor(point.ts / 1000) as UTCTimestamp,
+      value: point.equity,
+    })) as LineData<Time>[]
   }, [equity])
 
-  // Find trade points to mark on chart
+  // Prepare trade markers
   const tradeMarkers = useMemo(() => {
     if (!trades.length || !equity.length) return []
     return trades
       .filter((t) => t.action.includes('open') || t.action.includes('close'))
       .map((trade) => {
+        const tradeTime = Math.floor(trade.ts / 1000) as UTCTimestamp
         // Find closest equity point
         const closest = equity.reduce((prev, curr) =>
           Math.abs(curr.ts - trade.ts) < Math.abs(prev.ts - trade.ts) ? curr : prev
         )
+        const isOpen = trade.action.includes('open')
+        const isLong = trade.side === 'long' || trade.action.includes('long')
+        
         return {
-          ts: closest.ts,
-          equity: closest.equity,
-          action: trade.action,
-          symbol: trade.symbol,
-          isOpen: trade.action.includes('open'),
+          time: tradeTime,
+          position: 'inBar' as const,
+          color: isOpen ? (isLong ? '#0ECB81' : '#F6465D') : (trade.realized_pnl >= 0 ? '#0ECB81' : '#F6465D'),
+          shape: 'circle' as const,
+          size: 2,
         }
       })
       .slice(-30) // Limit markers
+      .sort((a, b) => (a.time as number) - (b.time as number)) as SeriesMarker<Time>[]
   }, [trades, equity])
 
+  // Initialize chart
+  useEffect(() => {
+    if (!chartContainerRef.current || equityData.length === 0) return
+
+    const container = chartContainerRef.current
+
+    // Create chart
+    const chart = createChart(container, {
+      layout: {
+        background: { type: ColorType.Solid, color: '#0B0E11' },
+        textColor: '#848E9C',
+      },
+      grid: {
+        vertLines: { color: 'rgba(43, 49, 57, 0.5)' },
+        horzLines: { color: 'rgba(43, 49, 57, 0.5)' },
+      },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+      },
+      rightPriceScale: {
+        borderColor: '#2B3139',
+      },
+      timeScale: {
+        borderColor: '#2B3139',
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      width: container.clientWidth,
+      height: 300,
+    })
+
+    chartRef.current = chart
+
+    // Add line series for equity
+    const lineSeries = chart.addSeries(LineSeries, {
+      color: '#F0B90B',
+      lineWidth: 2,
+      priceFormat: {
+        type: 'price',
+        precision: 2,
+        minMove: 0.01,
+      },
+    })
+    lineSeriesRef.current = lineSeries
+
+    // Set data
+    lineSeries.setData(equityData)
+
+    // Add trade markers
+    if (tradeMarkers.length > 0) {
+      createSeriesMarkers(lineSeries, tradeMarkers)
+    }
+
+    // Subscribe to time range changes for synchronization
+    if (onTimeRangeChange) {
+      chart.timeScale().subscribeVisibleTimeRangeChange((timeRange) => {
+        if (!isSyncingRef.current && timeRange) {
+          onTimeRangeChange({
+            from: timeRange.from as number,
+            to: timeRange.to as number,
+          })
+        }
+      })
+    }
+
+    // Handle resize
+    const handleResize = () => {
+      if (chartContainerRef.current) {
+        chart.applyOptions({ width: chartContainerRef.current.clientWidth })
+      }
+    }
+    window.addEventListener('resize', handleResize)
+
+    // Fit content initially
+    chart.timeScale().fitContent()
+
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      chart.remove()
+      chartRef.current = null
+      lineSeriesRef.current = null
+    }
+  }, [equityData, tradeMarkers, onTimeRangeChange])
+
+  // Sync time range from external source (e.g., candlestick chart)
+  useEffect(() => {
+    if (!chartRef.current || !syncTimeRange || isSyncingRef.current) return
+
+    isSyncingRef.current = true
+    const timeScale = chartRef.current.timeScale()
+    timeScale.setVisibleRange({
+      from: syncTimeRange.from as Time,
+      to: syncTimeRange.to as Time,
+    })
+    // Reset flag after a short delay
+    setTimeout(() => {
+      isSyncingRef.current = false
+    }, 100)
+  }, [syncTimeRange])
+
+  if (equityData.length === 0) {
+    return (
+      <div className="w-full h-[300px] flex items-center justify-center" style={{ color: '#5E6673' }}>
+        No equity data available
+      </div>
+    )
+  }
+
   return (
-    <div className="w-full h-[300px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-          <defs>
-            <linearGradient id="equityGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#F0B90B" stopOpacity={0.4} />
-              <stop offset="95%" stopColor="#F0B90B" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid stroke="rgba(43, 49, 57, 0.5)" strokeDasharray="3 3" />
-          <XAxis
-            dataKey="time"
-            tick={{ fill: '#848E9C', fontSize: 10 }}
-            axisLine={{ stroke: '#2B3139' }}
-            tickLine={{ stroke: '#2B3139' }}
-            hide
-          />
-          <YAxis
-            tick={{ fill: '#848E9C', fontSize: 10 }}
-            axisLine={{ stroke: '#2B3139' }}
-            tickLine={{ stroke: '#2B3139' }}
-            width={60}
-            domain={['auto', 'auto']}
-          />
-          <Tooltip
-            contentStyle={{
-              background: '#1E2329',
-              border: '1px solid #2B3139',
-              borderRadius: 8,
-              color: '#EAECEF',
-            }}
-            labelStyle={{ color: '#848E9C' }}
-            formatter={(value: number) => [`$${value.toFixed(2)}`, 'Equity']}
-          />
-          <Area
-            type="monotone"
-            dataKey="equity"
-            stroke="#F0B90B"
-            strokeWidth={2}
-            fill="url(#equityGradient)"
-            dot={false}
-            activeDot={{ r: 4, fill: '#F0B90B' }}
-          />
-          {/* Trade markers */}
-          {tradeMarkers.map((marker, idx) => (
-            <ReferenceDot
-              key={`${marker.ts}-${idx}`}
-              x={chartData.findIndex((d) => d.ts === marker.ts)}
-              y={marker.equity}
-              r={4}
-              fill={marker.isOpen ? '#0ECB81' : '#F6465D'}
-              stroke={marker.isOpen ? '#0ECB81' : '#F6465D'}
-            />
-          ))}
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
+    <div
+      ref={chartContainerRef}
+      className="w-full rounded-lg overflow-hidden"
+      style={{ background: '#0B0E11', minHeight: 300 }}
+    />
   )
 }
 
@@ -280,14 +339,19 @@ function CandlestickChartComponent({
   runId,
   trades,
   language,
+  onTimeRangeChange,
+  syncTimeRange,
 }: {
   runId: string
   trades: BacktestTradeEvent[]
   language: string
+  onTimeRangeChange?: (range: { from: number; to: number } | null) => void
+  syncTimeRange?: { from: number; to: number } | null
 }) {
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
+  const isSyncingRef = useRef(false)
 
   // Get unique symbols from trades
   const symbols = useMemo(() => {
@@ -420,6 +484,19 @@ function CandlestickChartComponent({
           .sort((a, b) => (a.time as number) - (b.time as number))
 
         createSeriesMarkers(candleSeries, markers)
+        
+        // Subscribe to time range changes for synchronization
+        if (onTimeRangeChange) {
+          chart.timeScale().subscribeVisibleTimeRangeChange((timeRange) => {
+            if (!isSyncingRef.current && timeRange) {
+              onTimeRangeChange({
+                from: timeRange.from as number,
+                to: timeRange.to as number,
+              })
+            }
+          })
+        }
+        
         chart.timeScale().fitContent()
         setIsLoading(false)
       })
@@ -442,7 +519,23 @@ function CandlestickChartComponent({
       chartRef.current = null
       candleSeriesRef.current = null
     }
-  }, [runId, selectedSymbol, selectedTimeframe, symbolTrades])
+  }, [runId, selectedSymbol, selectedTimeframe, symbolTrades, onTimeRangeChange])
+
+  // Sync time range from external source (e.g., equity chart)
+  useEffect(() => {
+    if (!chartRef.current || !syncTimeRange || isSyncingRef.current) return
+
+    isSyncingRef.current = true
+    const timeScale = chartRef.current.timeScale()
+    timeScale.setVisibleRange({
+      from: syncTimeRange.from as Time,
+      to: syncTimeRange.to as Time,
+    })
+    // Reset flag after a short delay
+    setTimeout(() => {
+      isSyncingRef.current = false
+    }, 100)
+  }, [syncTimeRange])
 
   if (symbols.length === 0) {
     return (
@@ -757,6 +850,9 @@ export function BacktestPage() {
   const [compareRunIds, setCompareRunIds] = useState<string[]>([])
   const [isStarting, setIsStarting] = useState(false)
   const [toast, setToast] = useState<{ text: string; tone: 'info' | 'error' | 'success' } | null>(null)
+  
+  // Time range synchronization state for charts
+  const [syncTimeRange, setSyncTimeRange] = useState<{ from: number; to: number } | null>(null)
 
   // Form state
   const [formState, setFormState] = useState({
@@ -1863,7 +1959,12 @@ export function BacktestPage() {
                           exit={{ opacity: 0 }}
                         >
                           {equity && equity.length > 0 ? (
-                            <BacktestChart equity={equity} trades={trades ?? []} />
+                            <BacktestChart 
+                              equity={equity} 
+                              trades={trades ?? []}
+                              onTimeRangeChange={setSyncTimeRange}
+                              syncTimeRange={syncTimeRange}
+                            />
                           ) : (
                             <div className="py-12 text-center" style={{ color: '#5E6673' }}>
                               {tr('charts.equityEmpty')}
@@ -1925,7 +2026,12 @@ export function BacktestPage() {
                               {language === 'zh' ? '资金曲线' : 'Equity Curve'}
                             </h4>
                             {equity && equity.length > 0 ? (
-                              <BacktestChart equity={equity} trades={trades ?? []} />
+                              <BacktestChart 
+                                equity={equity} 
+                                trades={trades ?? []}
+                                onTimeRangeChange={setSyncTimeRange}
+                                syncTimeRange={syncTimeRange}
+                              />
                             ) : (
                               <div className="py-12 text-center" style={{ color: '#5E6673' }}>
                                 {tr('charts.equityEmpty')}
@@ -1943,6 +2049,8 @@ export function BacktestPage() {
                                 runId={selectedRunId}
                                 trades={trades}
                                 language={language}
+                                onTimeRangeChange={setSyncTimeRange}
+                                syncTimeRange={syncTimeRange}
                               />
                             </div>
                           )}
@@ -1994,3 +2102,4 @@ export function BacktestPage() {
     </DeepVoidBackground>
   )
 }
+
