@@ -3,12 +3,11 @@
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org/)
 [![React](https://img.shields.io/badge/React-18+-61DAFB?style=flat&logo=react)](https://reactjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Backed by Amber.ac](https://img.shields.io/badge/Backed%20by-Amber.ac-orange.svg)](https://amber.ac)
+[![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
 **言語:** [English](README.md) | [中文](README.zh-CN.md) | [Українська](README.uk.md) | [Русский](README.ru.md) | [日本語](README.ja.md)
 
-**公式Twitter:** [@nofx_ai](https://x.com/nofx_ai)
+**公式Twitter:** [@nofx_official](https://x.com/nofx_official)
 
 ---
 
@@ -22,8 +21,6 @@
 - **マルチエージェント自己対戦＆自己進化**: 戦略が自動的に競争し、最適なものを選択、アカウントレベルのPnLとリスク制約に基づいて継続的に反復
 - **統合実行＆リスク管理**: 低レイテンシルーティング、スリッページ/リスク管理サンドボックス、アカウントレベルの制限、ワンクリック市場切り替え
 
-### 🏢 [Amber.ac](https://amber.ac)の支援
-
 ### 👥 コアチーム
 
 - **Tinkle** - [@Web3Tinkle](https://x.com/Web3Tinkle)
@@ -35,7 +32,7 @@
 
 **投資に関するお問い合わせ**は、TwitterでTinkleまたはZackにDMをお送りください。
 
-**パートナーシップおよび協業**については、公式Twitter [@nofx_ai](https://x.com/nofx_ai)にDMをお送りください。
+**パートナーシップおよび協業**については、公式Twitter [@nofx_official](https://x.com/nofx_official)にDMをお送りください。
 
 ---
 
@@ -205,8 +202,8 @@ nofx/
 ├── market/                         # マーケットデータ取得
 │   └── data.go                     # マーケットデータ＆テクニカル指標（K線、RSI、MACD）
 │
-├── pool/                           # コインプール管理
-│   └── coin_pool.go                # AI500 + OI Topマージプール
+├── provider/                       # データプロバイダー管理
+│   └── data_provider.go            # AI500 + OI Top データプロバイダー
 │
 ├── logger/                         # ロギングシステム
 │   └── decision_logger.go          # 判断記録 + パフォーマンス分析
@@ -355,7 +352,7 @@ sudo apt-get install libta-lib0-dev
 ### 2. プロジェクトをクローン
 
 ```bash
-git clone https://github.com/tinkle-community/nofx.git
+git clone https://github.com/NoFxAiOS/nofx.git
 cd nofx
 ```
 
@@ -1317,7 +1314,7 @@ IssueとPull Requestを歓迎します！
 
 
 ### 🐛 技術サポート
-- **GitHub Issues**: [Issueを提出](https://github.com/tinkle-community/nofx/issues)
+- **GitHub Issues**: [Issueを提出](https://github.com/NoFxAiOS/nofx/issues)
 - **開発者コミュニティ**: [Telegramグループ](https://t.me/nofx_dev_community)
 
 ---
@@ -1340,4 +1337,4 @@ IssueとPull Requestを歓迎します！
 
 ## ⭐ Star履歴
 
-[![Star履歴チャート](https://api.star-history.com/svg?repos=tinkle-community/nofx&type=Date)](https://star-history.com/#tinkle-community/nofx&Date)
+[![Star履歴チャート](https://api.star-history.com/svg?repos=NoFxAiOS/nofx&type=Date)](https://star-history.com/#NoFxAiOS/nofx&Date)

@@ -1,0 +1,92 @@
+# docker-compose.nginx.yml
+# NOFX with Nginx Reverse Proxy (HTTPS support)
+#
+# Usage:
+#   docker compose -f docker-compose.nginx.yml up -d
+#
+# This configuration includes:
+#   - Nginx reverse proxy with HTTPS (443) and HTTP (80)
+#   - Automatic HTTP to HTTPS redirect
+#   - SSL certificate support (mount ./ssl directory)
+#   - Backend and frontend services
+
+services:
+  # Nginx reverse proxy (HTTPS/HTTP)
+  nginx-proxy:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile.nginx-proxy
+    container_name: nofx-nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      # Mount SSL certificates (use your own certificates or self-signed)
+      - ./ssl:/etc/nginx/ssl:ro
+      # For Let's Encrypt ACME challenge (optional)
+      - ./certbot/www:/var/www/certbot:ro
+    networks:
+      - nofx-network
+    depends_on:
+      - nofx
+      - nofx-frontend
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # Backend service (API and core logic)
+  nofx:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile.backend
+    container_name: nofx-trading
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # Don't expose ports directly - access through nginx
+    expose:
+      - "8080"
+    volumes:
+      - ./data:/app/data
+      - /etc/localtime:/etc/localtime:ro
+    env_file:
+      - .env
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - AI_MAX_TOKENS=8000
+    networks:
+      - nofx-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Frontend service (static serving)
+  nofx-frontend:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile.frontend
+    container_name: nofx-frontend
+    restart: unless-stopped
+    # Don't expose ports directly - access through nginx
+    expose:
+      - "80"
+    networks:
+      - nofx-network
+    depends_on:
+      - nofx
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+networks:
+  nofx-network:
+    driver: bridge

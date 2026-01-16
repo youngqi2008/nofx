@@ -129,8 +129,8 @@ sudo apt-get install libta-lib0-dev
 
 **找不到您需要的内容？**
 - 💬 [Telegram 社区](https://t.me/nofx_dev_community)
-- 🐛 [GitHub Issues](https://github.com/tinkle-community/nofx/issues)
-- 🐦 [Twitter @nofx_ai](https://x.com/nofx_ai)
+- 🐛 [GitHub Issues](https://github.com/NoFxAiOS/nofx/issues)
+- 🐦 [Twitter @nofx_official](https://x.com/nofx_official)
 
 ---
 

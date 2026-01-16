@@ -33,11 +33,11 @@ describe('RegistrationDisabled Component', () => {
       expect(container).toBeTruthy()
     })
 
-    it('should display the Ares logo', () => {
+    it('should display the NoFx logo', () => {
       renderComponent()
-      const logo = screen.getByAltText('Ares Logo')
+      const logo = screen.getByAltText('NoFx Logo')
       expect(logo).toBeTruthy()
-      expect(logo.getAttribute('src')).toBe('/icons/ares.svg')
+      expect(logo.getAttribute('src')).toBe('/icons/nofx.svg')
     })
 
     it('should display registration closed heading', () => {

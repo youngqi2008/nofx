@@ -1,0 +1,97 @@
+# docker-compose.postgres.yml
+# PostgreSQL Database Service for NOFX
+#
+# Usage:
+#   docker compose -f docker-compose.postgres.yml up -d
+#
+# This configuration provides:
+#   - PostgreSQL 15 database
+#   - Persistent data storage
+#   - Health checks
+#   - Network configuration for NOFX services
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: nofx-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      # PostgreSQL configuration
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-nofx}
+      # PostgreSQL performance tuning
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+      # Timezone
+      TZ: ${TZ:-Asia/Shanghai}
+      # PostgreSQL configuration (via postgresql.conf)
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      # Persistent data storage
+      - postgres_data:/var/lib/postgresql/data
+      # Custom PostgreSQL configuration (optional)
+      - ./docker/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      # Initialization scripts (optional)
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+      # Timezone
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - nofx-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-nofx}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # Resource limits (optional, adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # pgAdmin (optional, for database management)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: nofx-pgadmin
+    restart: unless-stopped
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@nofx.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - nofx-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - tools  # Only start with --profile tools
+
+volumes:
+  postgres_data:
+    driver: local
+    name: nofx_postgres_data
+  pgadmin_data:
+    driver: local
+    name: nofx_pgadmin_data
+
+networks:
+  nofx-network:
+    external: true
+    # If network doesn't exist, create it with:
+    # docker network create nofx-network

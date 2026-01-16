@@ -1,95 +1,61 @@
 import { useState } from 'react'
-import { motion } from 'framer-motion'
-import { ArrowRight } from 'lucide-react'
 import HeaderBar from '../components/HeaderBar'
-import HeroSection from '../components/landing/HeroSection'
-import AboutSection from '../components/landing/AboutSection'
-import AnimatedSection from '../components/landing/AnimatedSection'
 import LoginModal from '../components/landing/LoginModal'
+import { LoginRequiredOverlay } from '../components/LoginRequiredOverlay'
 import FooterSection from '../components/landing/FooterSection'
+import TerminalHero from '../components/landing/core/TerminalHero'
+import LiveFeed from '../components/landing/core/LiveFeed'
+import AgentGrid from '../components/landing/core/AgentGrid'
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
-import { t } from '../i18n/translations'
 
 export function LandingPage() {
   const [showLoginModal, setShowLoginModal] = useState(false)
+  const [loginOverlayOpen, setLoginOverlayOpen] = useState(false)
+  const [loginOverlayFeature, setLoginOverlayFeature] = useState('')
   const { user, logout } = useAuth()
   const { language } = useLanguage()
   const isLoggedIn = !!user
 
-  console.log('LandingPage - user:', user, 'isLoggedIn:', isLoggedIn)
+  const handleLoginRequired = (featureName: string) => {
+    setLoginOverlayFeature(featureName)
+    setLoginOverlayOpen(true)
+  }
+
   return (
     <>
       <HeaderBar
         onLoginClick={() => setShowLoginModal(true)}
         isLoggedIn={isLoggedIn}
+        isHomePage={true}
+        language={language}
         user={user}
         onLogout={logout}
+        onLoginRequired={handleLoginRequired}
         onPageChange={(page) => {
-          console.log('LandingPage onPageChange called with:', page)
-          if (page === 'competition') {
-            window.location.href = '/competition'
-          } else if (page === 'traders') {
-            window.location.href = '/traders'
-          } else if (page === 'trader') {
-            window.location.href = '/dashboard'
+          const pathMap: Record<string, string> = {
+            'competition': '/competition',
+            'traders': '/traders',
+            'trader': '/dashboard',
+            'backtest': '/backtest',
+            'strategy': '/strategy',
+            'debate': '/debate',
+          }
+          const path = pathMap[page]
+          if (path) {
+            window.location.href = path
           }
         }}
       />
-      <div
-        className="min-h-screen px-4 sm:px-6 lg:px-8"
-        style={{
-          background: 'var(--background)',
-          color: 'var(--text-primary)',
-        }}
-      >
-        <HeroSection language={language} />
-        <AboutSection language={language} />
+      <div className="min-h-screen bg-nofx-bg text-nofx-text font-sans selection:bg-nofx-gold selection:text-black">
 
-        {/* CTA */}
-        <AnimatedSection backgroundColor="var(--panel-bg)">
-          <div className="max-w-4xl mx-auto text-center">
-            <motion.h2
-              className="text-5xl font-bold mb-6"
-              style={{ color: 'var(--text-primary)' }}
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-            >
-              {t('readyToDefine', language)}
-            </motion.h2>
-            <motion.p
-              className="text-xl mb-12"
-              style={{ color: 'var(--text-secondary)' }}
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ delay: 0.1 }}
-            >
-              {t('startWithCrypto', language)}
-            </motion.p>
-            <div className="flex flex-wrap justify-center gap-4">
-              <motion.button
-                onClick={() => setShowLoginModal(true)}
-                className="flex items-center gap-2 px-10 py-4 rounded-lg font-semibold text-lg"
-                style={{
-                  background: 'var(--brand-yellow)',
-                  color: 'var(--brand-black)',
-                }}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                {t('getStartedNow', language)}
-                <motion.div
-                  animate={{ x: [0, 5, 0] }}
-                  transition={{ duration: 1.5, repeat: Infinity }}
-                >
-                  <ArrowRight className="w-5 h-5" />
-                </motion.div>
-              </motion.button>
-            </div>
-          </div>
-        </AnimatedSection>
+        <TerminalHero />
+
+        <LiveFeed />
+
+        <AgentGrid />
+
+        <FooterSection language={language} />
 
         {showLoginModal && (
           <LoginModal
@@ -97,7 +63,12 @@ export function LandingPage() {
             language={language}
           />
         )}
-        <FooterSection language={language} />
+
+        <LoginRequiredOverlay
+          isOpen={loginOverlayOpen}
+          onClose={() => setLoginOverlayOpen(false)}
+          featureName={loginOverlayFeature}
+        />
       </div>
     </>
   )

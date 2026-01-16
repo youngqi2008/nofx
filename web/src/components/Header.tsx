@@ -16,14 +16,14 @@ export function Header({ simple = false }: HeaderProps) {
           {/* Left - Logo and Title */}
           <div className="flex items-center gap-3">
             <div className="flex items-center justify-center">
-              <img src="/icons/ares.svg" alt="Ares Logo" className="w-8 h-8" />
+              <img src="/icons/nofx.svg" alt="Ares Logo" className="w-8 h-8" />
             </div>
             <div>
-              <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
+              <h1 className="text-xl font-bold" style={{ color: '#EAECEF' }}>
                 {t('appTitle', language)}
               </h1>
               {!simple && (
-                <p className="text-xs mono" style={{ color: 'var(--text-secondary)' }}>
+                <p className="text-xs mono" style={{ color: '#848E9C' }}>
                   {t('subtitle', language)}
                 </p>
               )}

@@ -1,4 +1,4 @@
-# Ares Web Dashboard
+# NOFX Web Dashboard
 
 基于 Vite + React + TypeScript 的AI自动交易监控面板
 

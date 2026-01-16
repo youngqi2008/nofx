@@ -14,6 +14,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # ------------------------------------------------------------------------
@@ -70,107 +71,107 @@ check_env() {
     if [ ! -f ".env" ]; then
         print_warning ".env 不存在，从模板复制..."
         cp .env.example .env
-        print_info "✓ 已使用默认环境变量创建 .env"
-        print_info "💡 如需修改端口等设置，可编辑 .env 文件"
+        print_info "已创建 .env 文件"
     fi
     print_success "环境变量文件存在"
 }
 
 # ------------------------------------------------------------------------
-# Validation: Encryption Environment (RSA Keys + Data Encryption Key)
+# Helper: Check if env var is set and not placeholder
 # ------------------------------------------------------------------------
-check_encryption() {
-    local need_setup=false
-    
-    print_info "检查加密环境..."
-    
-    # 检查RSA密钥对
-    if [ ! -f "secrets/rsa_key" ] || [ ! -f "secrets/rsa_key.pub" ]; then
-        print_warning "RSA密钥对不存在"
-        need_setup=true
-    fi
-    
-    # 检查数据加密密钥
-    if [ ! -f ".env" ] || ! grep -q "^DATA_ENCRYPTION_KEY=" .env; then
-        print_warning "数据加密密钥未配置"
-        need_setup=true
-    fi
-    
-    # 检查JWT认证密钥
-    if [ ! -f ".env" ] || ! grep -q "^JWT_SECRET=" .env; then
-        print_warning "JWT认证密钥未配置"
-        need_setup=true
-    fi
-    
-    # 如果需要设置加密环境，直接自动设置
-    if [ "$need_setup" = "true" ]; then
-        print_info "🔐 检测到加密环境未配置，正在自动设置..."
-        print_info "加密环境用于保护敏感数据（API密钥、私钥等）"
-        echo ""
+is_env_configured() {
+    local var_name="$1"
+    local value=$(grep "^${var_name}=" .env 2>/dev/null | cut -d'=' -f2-)
 
-        # 检查加密设置脚本是否存在
-        if [ -f "scripts/setup_encryption.sh" ]; then
-            print_info "加密系统将保护: API密钥、私钥、Hyperliquid代理钱包"
-            echo ""
+    # 去除引号
+    value=$(echo "$value" | tr -d '"'"'")
 
-            # 自动运行加密设置脚本
-            echo -e "Y\nn\nn" | bash scripts/setup_encryption.sh
-            if [ $? -eq 0 ]; then
-                echo ""
-                print_success "🔐 加密环境设置完成！"
-                print_info "  • RSA-2048密钥对已生成"
-                print_info "  • AES-256数据加密密钥已配置"
-                print_info "  • JWT认证密钥已配置"
-                print_info "  • 所有敏感数据现在都受加密保护"
-                echo ""
-            else
-                print_error "加密环境设置失败"
-                exit 1
-            fi
+    # 检查是否为空或占位符
+    if [ -z "$value" ]; then
+        return 1
+    fi
+
+    # 检查是否是示例值
+    case "$value" in
+        *your-*|*YOUR_*|*change-this*|*CHANGE_THIS*|*example*|*EXAMPLE*)
+            return 1
+            ;;
+    esac
+
+    return 0
+}
+
+# ------------------------------------------------------------------------
+# Helper: Generate and set env var in .env file
+# ------------------------------------------------------------------------
+set_env_var() {
+    local var_name="$1"
+    local var_value="$2"
+
+    # 如果变量已存在（即使是占位符），替换它
+    if grep -q "^${var_name}=" .env 2>/dev/null; then
+        # macOS 和 Linux 兼容的 sed
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s|^${var_name}=.*|${var_name}=${var_value}|" .env
         else
-            print_error "加密设置脚本不存在: scripts/setup_encryption.sh"
-            print_info "请手动运行: ./scripts/setup_encryption.sh"
-            exit 1
+            sed -i "s|^${var_name}=.*|${var_name}=${var_value}|" .env
         fi
     else
-        print_success "🔐 加密环境已配置"
-        print_info "  • RSA密钥对: secrets/rsa_key + secrets/rsa_key.pub"
-        print_info "  • 数据加密密钥: .env (DATA_ENCRYPTION_KEY)"
-        print_info "  • JWT认证密钥: .env (JWT_SECRET)"
-        print_info "  • 加密算法: RSA-OAEP-2048 + AES-256-GCM + HS256"
-        print_info "  • 保护数据: API密钥、私钥、Hyperliquid代理钱包、用户认证"
-        
-        # 验证密钥文件权限
-        if [ -f "secrets/rsa_key" ]; then
-            local perm=$(stat -f "%A" "secrets/rsa_key" 2>/dev/null || stat -c "%a" "secrets/rsa_key" 2>/dev/null)
-            if [ "$perm" != "600" ]; then
-                print_warning "修复RSA私钥权限..."
-                chmod 600 secrets/rsa_key
-            fi
-        fi
-        
-        if [ -f ".env" ]; then
-            local perm=$(stat -f "%A" ".env" 2>/dev/null || stat -c "%a" ".env" 2>/dev/null)
-            if [ "$perm" != "600" ]; then
-                print_warning "修复环境文件权限..."
-                chmod 600 .env
-            fi
-        fi
+        # 变量不存在，追加
+        echo "${var_name}=${var_value}" >> .env
     fi
 }
 
 # ------------------------------------------------------------------------
-# Validation: Configuration File (config.json) - BASIC SETTINGS ONLY
+# Validation: Encryption Keys in .env
 # ------------------------------------------------------------------------
-check_config() {
-    if [ ! -f "config.json" ]; then
-        print_warning "config.json 不存在，从模板复制..."
-        cp config.json.example config.json
-        print_info "✓ 已使用默认配置创建 config.json"
-        print_info "💡 如需修改基础设置（杠杆大小、开仓币种、管理员模式、JWT密钥等），可编辑 config.json"
-        print_info "💡 模型/交易所/交易员配置请使用Web界面"
+check_encryption() {
+    print_info "检查加密密钥配置..."
+
+    local generated=false
+
+    # 检查并生成 JWT_SECRET
+    if ! is_env_configured "JWT_SECRET"; then
+        print_warning "JWT_SECRET 未配置，正在生成..."
+        local jwt_secret=$(openssl rand -base64 32)
+        set_env_var "JWT_SECRET" "$jwt_secret"
+        print_success "JWT_SECRET 已生成"
+        generated=true
     fi
-    print_success "配置文件存在"
+
+    # 检查并生成 DATA_ENCRYPTION_KEY
+    if ! is_env_configured "DATA_ENCRYPTION_KEY"; then
+        print_warning "DATA_ENCRYPTION_KEY 未配置，正在生成..."
+        local data_key=$(openssl rand -base64 32)
+        set_env_var "DATA_ENCRYPTION_KEY" "$data_key"
+        print_success "DATA_ENCRYPTION_KEY 已生成"
+        generated=true
+    fi
+
+    # 检查并生成 RSA_PRIVATE_KEY
+    if ! is_env_configured "RSA_PRIVATE_KEY"; then
+        print_warning "RSA_PRIVATE_KEY 未配置，正在生成..."
+        # 生成 RSA 密钥并转换为单行格式（\n 替换为 \\n）
+        local rsa_key=$(openssl genrsa 2048 2>/dev/null | awk '{printf "%s\\n", $0}')
+        set_env_var "RSA_PRIVATE_KEY" "\"$rsa_key\""
+        print_success "RSA_PRIVATE_KEY 已生成"
+        generated=true
+    fi
+
+    if [ "$generated" = true ]; then
+        echo ""
+        print_success "所有缺失的密钥已自动生成并保存到 .env"
+        print_warning "请妥善保管 .env 文件，不要提交到版本控制系统"
+        echo ""
+    fi
+
+    print_success "加密密钥检查完成"
+    print_info "  • JWT_SECRET: OK"
+    print_info "  • DATA_ENCRYPTION_KEY: OK"
+    print_info "  • RSA_PRIVATE_KEY: OK"
+
+    # 修复 .env 文件权限
+    chmod 600 .env 2>/dev/null || true
 }
 
 # ------------------------------------------------------------------------
@@ -178,75 +179,33 @@ check_config() {
 # ------------------------------------------------------------------------
 read_env_vars() {
     if [ -f ".env" ]; then
-        # 读取端口配置，设置默认值
         NOFX_FRONTEND_PORT=$(grep "^NOFX_FRONTEND_PORT=" .env 2>/dev/null | cut -d'=' -f2 || echo "3000")
         NOFX_BACKEND_PORT=$(grep "^NOFX_BACKEND_PORT=" .env 2>/dev/null | cut -d'=' -f2 || echo "8080")
-        
-        # 去除可能的引号和空格
+
         NOFX_FRONTEND_PORT=$(echo "$NOFX_FRONTEND_PORT" | tr -d '"'"'" | tr -d ' ')
         NOFX_BACKEND_PORT=$(echo "$NOFX_BACKEND_PORT" | tr -d '"'"'" | tr -d ' ')
-        
-        # 如果为空则使用默认值
+
         NOFX_FRONTEND_PORT=${NOFX_FRONTEND_PORT:-3000}
         NOFX_BACKEND_PORT=${NOFX_BACKEND_PORT:-8080}
     else
-        # 如果.env不存在，使用默认端口
         NOFX_FRONTEND_PORT=3000
         NOFX_BACKEND_PORT=8080
     fi
 }
 
 # ------------------------------------------------------------------------
-# Validation: Database File (config.db)
+# Validation: Database Directory (data/)
 # ------------------------------------------------------------------------
 check_database() {
-    if [ -d "config.db" ]; then
-        # 如果存在的是目录，删除它
-        print_warning "config.db 是目录而非文件，正在删除目录..."
-        rm -rf config.db
-        print_info "✓ 已删除目录，现在创建文件..."
-        install -m 600 /dev/null config.db
-        print_success "✓ 已创建空数据库文件（权限: 600），系统将在启动时初始化"
-    elif [ ! -f "config.db" ]; then
-        # 如果不存在文件，创建它
-        print_warning "数据库文件不存在，创建空数据库文件..."
-        # 创建空文件以避免Docker创建目录（使用安全权限600）
-        install -m 600 /dev/null config.db
-        print_info "✓ 已创建空数据库文件（权限: 600），系统将在启动时初始化"
+    # Ensure data directory exists
+    if [ ! -d "data" ]; then
+        print_warning "数据目录不存在，创建 data/ 目录..."
+        install -m 700 -d data
+        print_success "已创建 data/ 目录"
     else
-        # 文件存在
-        print_success "数据库文件存在"
+        print_success "数据目录存在"
     fi
 }
-
-# ------------------------------------------------------------------------
-# Build: Frontend (Node.js Based)
-# ------------------------------------------------------------------------
-# build_frontend() {
-#     print_info "检查前端构建环境..."
-
-#     if ! command -v node &> /dev/null; then
-#         print_error "Node.js 未安装！请先安装 Node.js"
-#         exit 1
-#     fi
-
-#     if ! command -v npm &> /dev/null; then
-#         print_error "npm 未安装！请先安装 npm"
-#         exit 1
-#     fi
-
-#     print_info "正在构建前端..."
-#     cd web
-
-#     print_info "安装 Node.js 依赖..."
-#     npm install
-
-#     print_info "构建前端应用..."
-#     npm run build
-
-#     cd ..
-#     print_success "前端构建完成"
-# }
 
 # ------------------------------------------------------------------------
 # Service Management: Start
@@ -254,25 +213,13 @@ check_database() {
 start() {
     print_info "正在启动 NOFX AI Trading System..."
 
-    # 读取环境变量
     read_env_vars
 
-    # 确保必要的文件和目录存在（修复 Docker volume 挂载问题）
-    if [ ! -f "config.db" ]; then
-        print_info "创建数据库文件..."
-        install -m 600 /dev/null config.db
-    fi
-    if [ ! -d "decision_logs" ]; then
-        print_info "创建日志目录..."
-        install -m 700 -d decision_logs
+    if [ ! -d "data" ]; then
+        print_info "创建数据目录..."
+        install -m 700 -d data
     fi
 
-    # Auto-build frontend if missing or forced
-    # if [ ! -d "web/dist" ] || [ "$1" == "--build" ]; then
-    #     build_frontend
-    # fi
-
-    # Rebuild images if flag set
     if [ "$1" == "--build" ]; then
         print_info "重新构建镜像..."
         $COMPOSE_CMD up -d --build
@@ -322,9 +269,8 @@ logs() {
 # Monitoring: Status
 # ------------------------------------------------------------------------
 status() {
-    # 读取环境变量
     read_env_vars
-    
+
     print_info "服务状态:"
     $COMPOSE_CMD ps
     echo ""
@@ -358,18 +304,42 @@ update() {
 }
 
 # ------------------------------------------------------------------------
-# Encryption: Manual Setup
+# Command: Regenerate all keys (force)
 # ------------------------------------------------------------------------
-setup_encryption_manual() {
-    print_info "🔐 手动设置加密环境"
-    
-    if [ -f "scripts/setup_encryption.sh" ]; then
-        bash scripts/setup_encryption.sh
-    else
-        print_error "加密设置脚本不存在: scripts/setup_encryption.sh"
-        print_info "请确保项目文件完整"
-        exit 1
+regenerate_keys() {
+    print_warning "这将重新生成所有加密密钥！"
+    print_warning "如果已有加密数据，重新生成后将无法解密！"
+    echo ""
+    read -p "确认重新生成？(yes/no): " confirm
+    if [ "$confirm" != "yes" ]; then
+        print_info "已取消"
+        return
     fi
+
+    check_env
+
+    print_info "正在生成新的密钥..."
+
+    # 生成 JWT_SECRET
+    local jwt_secret=$(openssl rand -base64 32)
+    set_env_var "JWT_SECRET" "$jwt_secret"
+    print_success "JWT_SECRET 已生成"
+
+    # 生成 DATA_ENCRYPTION_KEY
+    local data_key=$(openssl rand -base64 32)
+    set_env_var "DATA_ENCRYPTION_KEY" "$data_key"
+    print_success "DATA_ENCRYPTION_KEY 已生成"
+
+    # 生成 RSA_PRIVATE_KEY
+    local rsa_key=$(openssl genrsa 2048 2>/dev/null | awk '{printf "%s\\n", $0}')
+    set_env_var "RSA_PRIVATE_KEY" "\"$rsa_key\""
+    print_success "RSA_PRIVATE_KEY 已生成"
+
+    chmod 600 .env 2>/dev/null || true
+
+    echo ""
+    print_success "所有密钥已重新生成并保存到 .env"
+    print_warning "请妥善保管 .env 文件"
 }
 
 # ------------------------------------------------------------------------
@@ -388,18 +358,16 @@ show_help() {
     echo "  status             查看服务状态"
     echo "  clean              清理所有容器和数据"
     echo "  update             更新代码并重启"
-    echo "  setup-encryption   设置加密环境（RSA密钥+数据加密）"
+    echo "  regenerate-keys    重新生成所有加密密钥（慎用）"
     echo "  help               显示此帮助信息"
     echo ""
     echo "示例:"
     echo "  ./start.sh start --build    # 构建并启动"
     echo "  ./start.sh logs backend     # 查看后端日志"
     echo "  ./start.sh status           # 查看状态"
-    echo "  ./start.sh setup-encryption # 手动设置加密环境"
     echo ""
-    echo "🔐 关于加密:"
-    echo "  系统自动检测加密环境，首次运行时会自动设置"
-    echo "  手动设置: ./scripts/setup_encryption.sh"
+    echo "首次使用:"
+    echo "  直接运行 ./start.sh 即可，缺失的密钥会自动生成"
 }
 
 # ------------------------------------------------------------------------
@@ -412,7 +380,6 @@ main() {
         start)
             check_env
             check_encryption
-            check_config
             check_database
             start "$2"
             ;;
@@ -434,8 +401,8 @@ main() {
         update)
             update
             ;;
-        setup-encryption)
-            setup_encryption_manual
+        regenerate-keys)
+            regenerate_keys
             ;;
         help|--help|-h)
             show_help
