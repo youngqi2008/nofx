@@ -198,10 +198,6 @@ function BacktestChart({
       .filter((t) => t.action.includes('open') || t.action.includes('close'))
       .map((trade) => {
         const tradeTime = Math.floor(trade.ts / 1000) as UTCTimestamp
-        // Find closest equity point
-        const closest = equity.reduce((prev, curr) =>
-          Math.abs(curr.ts - trade.ts) < Math.abs(prev.ts - trade.ts) ? curr : prev
-        )
         const isOpen = trade.action.includes('open')
         const isLong = trade.side === 'long' || trade.action.includes('long')
         
@@ -273,7 +269,17 @@ function BacktestChart({
     // Subscribe to time range changes for synchronization
     if (onTimeRangeChange) {
       chart.timeScale().subscribeVisibleTimeRangeChange((timeRange) => {
-        if (!isSyncingRef.current && timeRange) {
+        if (
+          !isSyncingRef.current && 
+          timeRange && 
+          timeRange.from != null && 
+          timeRange.to != null &&
+          typeof timeRange.from === 'number' &&
+          typeof timeRange.to === 'number' &&
+          !isNaN(timeRange.from) &&
+          !isNaN(timeRange.to) &&
+          timeRange.from < timeRange.to
+        ) {
           onTimeRangeChange({
             from: timeRange.from as number,
             to: timeRange.to as number,
@@ -304,17 +310,35 @@ function BacktestChart({
   // Sync time range from external source (e.g., candlestick chart)
   useEffect(() => {
     if (!chartRef.current || !syncTimeRange || isSyncingRef.current) return
+    
+    // Validate time range values
+    if (
+      syncTimeRange.from == null || 
+      syncTimeRange.to == null ||
+      typeof syncTimeRange.from !== 'number' ||
+      typeof syncTimeRange.to !== 'number' ||
+      isNaN(syncTimeRange.from) ||
+      isNaN(syncTimeRange.to) ||
+      syncTimeRange.from >= syncTimeRange.to
+    ) {
+      return
+    }
 
-    isSyncingRef.current = true
-    const timeScale = chartRef.current.timeScale()
-    timeScale.setVisibleRange({
-      from: syncTimeRange.from as Time,
-      to: syncTimeRange.to as Time,
-    })
-    // Reset flag after a short delay
-    setTimeout(() => {
+    try {
+      isSyncingRef.current = true
+      const timeScale = chartRef.current.timeScale()
+      timeScale.setVisibleRange({
+        from: syncTimeRange.from as Time,
+        to: syncTimeRange.to as Time,
+      })
+      // Reset flag after a short delay
+      setTimeout(() => {
+        isSyncingRef.current = false
+      }, 100)
+    } catch (err) {
+      console.warn('Failed to set visible range:', err)
       isSyncingRef.current = false
-    }, 100)
+    }
   }, [syncTimeRange])
 
   if (equityData.length === 0) {
@@ -488,7 +512,17 @@ function CandlestickChartComponent({
         // Subscribe to time range changes for synchronization
         if (onTimeRangeChange) {
           chart.timeScale().subscribeVisibleTimeRangeChange((timeRange) => {
-            if (!isSyncingRef.current && timeRange) {
+            if (
+              !isSyncingRef.current && 
+              timeRange && 
+              timeRange.from != null && 
+              timeRange.to != null &&
+              typeof timeRange.from === 'number' &&
+              typeof timeRange.to === 'number' &&
+              !isNaN(timeRange.from) &&
+              !isNaN(timeRange.to) &&
+              timeRange.from < timeRange.to
+            ) {
               onTimeRangeChange({
                 from: timeRange.from as number,
                 to: timeRange.to as number,
@@ -524,17 +558,35 @@ function CandlestickChartComponent({
   // Sync time range from external source (e.g., equity chart)
   useEffect(() => {
     if (!chartRef.current || !syncTimeRange || isSyncingRef.current) return
+    
+    // Validate time range values
+    if (
+      syncTimeRange.from == null || 
+      syncTimeRange.to == null ||
+      typeof syncTimeRange.from !== 'number' ||
+      typeof syncTimeRange.to !== 'number' ||
+      isNaN(syncTimeRange.from) ||
+      isNaN(syncTimeRange.to) ||
+      syncTimeRange.from >= syncTimeRange.to
+    ) {
+      return
+    }
 
-    isSyncingRef.current = true
-    const timeScale = chartRef.current.timeScale()
-    timeScale.setVisibleRange({
-      from: syncTimeRange.from as Time,
-      to: syncTimeRange.to as Time,
-    })
-    // Reset flag after a short delay
-    setTimeout(() => {
+    try {
+      isSyncingRef.current = true
+      const timeScale = chartRef.current.timeScale()
+      timeScale.setVisibleRange({
+        from: syncTimeRange.from as Time,
+        to: syncTimeRange.to as Time,
+      })
+      // Reset flag after a short delay
+      setTimeout(() => {
+        isSyncingRef.current = false
+      }, 100)
+    } catch (err) {
+      console.warn('Failed to set visible range:', err)
       isSyncingRef.current = false
-    }, 100)
+    }
   }, [syncTimeRange])
 
   if (symbols.length === 0) {
