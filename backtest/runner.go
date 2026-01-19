@@ -416,6 +416,8 @@ func (r *Runner) stepOnce() error {
 		if liquidationNote != "" {
 			record.ErrorMessage = liquidationNote
 		}
+		// Set CycleNumber to match the cycle used for logging
+		record.CycleNumber = cycleForLog
 	}
 
 	equity, unrealized, _ := r.account.TotalEquity(priceMap)

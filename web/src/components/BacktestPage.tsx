@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef, type FormEvent } from 'react'
 import useSWR from 'swr'
 import { motion, AnimatePresence } from 'framer-motion'
-import { createChart, ColorType, CrosshairMode, CandlestickSeries, LineSeries, createSeriesMarkers, type IChartApi, type ISeriesApi, type CandlestickData, type LineData, type UTCTimestamp, type SeriesMarker, type Time } from 'lightweight-charts'
+import { createChart, ColorType, CrosshairMode, CandlestickSeries, LineSeries, createSeriesMarkers, type IChartApi, type ISeriesApi, type CandlestickData, type LineData, type UTCTimestamp, type SeriesMarker, type Time, type MouseEventParams } from 'lightweight-charts'
 import {
   Play,
   Pause,
@@ -166,29 +166,106 @@ function ProgressRing({ progress, size = 120 }: { progress: number; size?: numbe
   )
 }
 
+// Modal Component for displaying CoT Trace
+function CoTTraceModal({
+  isOpen,
+  onClose,
+  cotTrace,
+  cycleNumber,
+  timestamp,
+  language,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  cotTrace: string
+  cycleNumber: number
+  timestamp: string
+  language: string
+}) {
+  if (!isOpen) return null
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0, 0, 0, 0.7)' }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
+        className="relative w-full max-w-4xl max-h-[90vh] rounded-xl overflow-hidden"
+        style={{ background: '#1E2329', border: '1px solid #2B3139' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: '#2B3139' }}>
+          <div>
+            <h3 className="text-lg font-semibold" style={{ color: '#EAECEF' }}>
+              {language === 'zh' ? '思维链 (Chain of Thought)' : 'Chain of Thought'}
+            </h3>
+            <p className="text-sm mt-1" style={{ color: '#848E9C' }}>
+              {language === 'zh' ? '周期' : 'Cycle'} #{cycleNumber} · {new Date(timestamp).toLocaleString()}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 rounded hover:bg-opacity-20 transition-colors"
+            style={{ color: '#848E9C', background: 'rgba(132, 142, 156, 0.1)' }}
+          >
+            <XCircle size={20} />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 overflow-y-auto" style={{ maxHeight: 'calc(90vh - 80px)' }}>
+          <pre
+            className="whitespace-pre-wrap font-mono text-sm leading-relaxed"
+            style={{ color: '#EAECEF' }}
+          >
+            {cotTrace || (language === 'zh' ? '暂无思维链数据' : 'No CoT trace available')}
+          </pre>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
 // Equity Chart Component using lightweight-charts (for time axis synchronization)
 function BacktestChart({
   equity,
   trades,
+  decisions,
+  runId,
   onTimeRangeChange,
   syncTimeRange,
+  language,
 }: {
   equity: BacktestEquityPoint[]
   trades: BacktestTradeEvent[]
+  decisions?: DecisionRecord[]
+  runId?: string
   onTimeRangeChange?: (range: { from: number; to: number } | null) => void
   syncTimeRange?: { from: number; to: number } | null
+  language: string
 }) {
+  const [selectedDecision, setSelectedDecision] = useState<DecisionRecord | null>(null)
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isLoadingDecision, setIsLoadingDecision] = useState(false)
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const lineSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const isSyncingRef = useRef(false)
+  const clickHandlerRef = useRef<((param: MouseEventParams<Time>) => void) | null>(null)
 
-  // Prepare equity data for lightweight-charts
+  // Prepare equity data for lightweight-charts with cycle information
   const equityData = useMemo(() => {
     return equity.map((point) => ({
       time: Math.floor(point.ts / 1000) as UTCTimestamp,
       value: point.equity,
-    })) as LineData<Time>[]
+      cycle: point.cycle,
+      ts: point.ts,
+    })) as (LineData<Time> & { cycle: number; ts: number })[]
   }, [equity])
 
   // Prepare trade markers
@@ -266,6 +343,154 @@ function BacktestChart({
       createSeriesMarkers(lineSeries, tradeMarkers)
     }
 
+    // Subscribe to click events on the chart
+    const handleChartClick = (param: MouseEventParams<Time>) => {
+      console.log('[BacktestChart] Click event triggered:', param)
+      
+      if (!param.point) {
+        console.log('[BacktestChart] No point in click event')
+        return
+      }
+      
+      if (param.time === undefined) {
+        console.log('[BacktestChart] No time in click event')
+        return
+      }
+      
+      // Find the closest equity point to the clicked time
+      const clickedTime = param.time as number
+      console.log('[BacktestChart] Clicked time:', clickedTime, new Date(clickedTime * 1000).toISOString())
+      
+      const clickedPoint = equityData.find((point) => {
+        const pointTime = point.time as number
+        return Math.abs(pointTime - clickedTime) < 60 // Within 1 minute
+      }) || equityData.reduce((prev, curr) => {
+        const prevTime = prev.time as number
+        const currTime = curr.time as number
+        return Math.abs(currTime - clickedTime) < Math.abs(prevTime - clickedTime) ? curr : prev
+      })
+
+      console.log('[BacktestChart] Found equity point:', clickedPoint, 'decisions available:', decisions?.length)
+
+      if (!clickedPoint) {
+        console.log('[BacktestChart] No equity point found')
+        return
+      }
+
+      if (!decisions || decisions.length === 0) {
+        console.log('[BacktestChart] No decisions available')
+        return
+      }
+
+      // Find decision record by cycle number
+      let decision = decisions?.find((d) => d.cycle_number === clickedPoint.cycle)
+      console.log('[BacktestChart] Found decision:', decision ? `Cycle ${decision.cycle_number}` : 'None', 'for cycle:', clickedPoint.cycle)
+      
+      // If not found locally, try to fetch from API
+      if (!decision && runId && clickedPoint.cycle > 0) {
+        console.log('[BacktestChart] Decision not found locally, fetching from API for cycle:', clickedPoint.cycle)
+        setIsLoadingDecision(true)
+        api.getBacktestTrace(runId, clickedPoint.cycle)
+          .then((fetchedDecision) => {
+            console.log('[BacktestChart] Successfully fetched decision from API:', fetchedDecision)
+            if (fetchedDecision && fetchedDecision.cot_trace) {
+              setSelectedDecision(fetchedDecision)
+              setIsModalOpen(true)
+            } else {
+              console.log('[BacktestChart] Fetched decision has no CoT trace')
+            }
+            setIsLoadingDecision(false)
+          })
+          .catch((err) => {
+            console.warn('[BacktestChart] Failed to fetch decision from API:', err)
+            setIsLoadingDecision(false)
+          })
+        return
+      }
+      
+      if (decision) {
+        if (decision.cot_trace) {
+          console.log('[BacktestChart] Opening modal with CoT trace')
+          setSelectedDecision(decision)
+          setIsModalOpen(true)
+        } else {
+          console.log('[BacktestChart] Decision found but no CoT trace available')
+        }
+      } else {
+        console.log('[BacktestChart] No decision found for cycle:', clickedPoint.cycle)
+      }
+    }
+    
+    clickHandlerRef.current = handleChartClick
+    chart.subscribeClick(handleChartClick)
+    
+    // Use crosshair to track mouse position, then handle click on container (fallback method)
+    let lastCrosshairTime: Time | null = null
+    const crosshairMoveHandler = (param: { time?: Time }) => {
+      if (param.time) {
+        lastCrosshairTime = param.time
+      }
+    }
+    
+    chart.subscribeCrosshairMove(crosshairMoveHandler)
+    
+    const containerClickHandler = () => {
+      console.log('[BacktestChart] Container click event triggered')
+      if (!lastCrosshairTime) {
+        console.log('[BacktestChart] No crosshair time available')
+        return
+      }
+      
+      const clickedTime = lastCrosshairTime as number
+      console.log('[BacktestChart] Container click - time:', clickedTime, new Date(clickedTime * 1000).toISOString())
+      
+      const clickedPoint = equityData.find((point) => {
+        const pointTime = point.time as number
+        return Math.abs(pointTime - clickedTime) < 60
+      }) || equityData.reduce((prev, curr) => {
+        const prevTime = prev.time as number
+        const currTime = curr.time as number
+        return Math.abs(currTime - clickedTime) < Math.abs(prevTime - clickedTime) ? curr : prev
+      })
+
+      console.log('[BacktestChart] Container click - found point:', clickedPoint)
+
+      if (clickedPoint) {
+        // Find decision record by cycle number
+        let decision = decisions?.find((d) => d.cycle_number === clickedPoint.cycle)
+        console.log('[BacktestChart] Container click - found decision:', decision ? `Cycle ${decision.cycle_number}` : 'None')
+        
+        // If not found locally, try to fetch from API
+        if (!decision && runId && clickedPoint.cycle > 0) {
+          console.log('[BacktestChart] Container click - Decision not found locally, fetching from API for cycle:', clickedPoint.cycle)
+          setIsLoadingDecision(true)
+          api.getBacktestTrace(runId, clickedPoint.cycle)
+            .then((fetchedDecision) => {
+              console.log('[BacktestChart] Container click - Successfully fetched decision from API:', fetchedDecision)
+              if (fetchedDecision && fetchedDecision.cot_trace) {
+                setSelectedDecision(fetchedDecision)
+                setIsModalOpen(true)
+              } else {
+                console.log('[BacktestChart] Container click - Fetched decision has no CoT trace')
+              }
+              setIsLoadingDecision(false)
+            })
+            .catch((err) => {
+              console.warn('[BacktestChart] Container click - Failed to fetch decision from API:', err)
+              setIsLoadingDecision(false)
+            })
+          return
+        }
+        
+        if (decision && decision.cot_trace) {
+          setSelectedDecision(decision)
+          setIsModalOpen(true)
+        }
+      }
+    }
+    
+    container.addEventListener('click', containerClickHandler)
+
     // Subscribe to time range changes for synchronization
     if (onTimeRangeChange) {
       chart.timeScale().subscribeVisibleTimeRangeChange((timeRange) => {
@@ -278,12 +503,26 @@ function BacktestChart({
           typeof timeRange.to === 'number' &&
           !isNaN(timeRange.from) &&
           !isNaN(timeRange.to) &&
+          isFinite(timeRange.from) &&
+          isFinite(timeRange.to) &&
+          timeRange.from > 0 &&
+          timeRange.to > 0 &&
           timeRange.from < timeRange.to
         ) {
-          onTimeRangeChange({
-            from: timeRange.from as number,
-            to: timeRange.to as number,
-          })
+          // Validate timestamp range (2000-01-01 to 2100-01-01)
+          const minTimestamp = 946684800
+          const maxTimestamp = 4102444800
+          if (
+            timeRange.from >= minTimestamp &&
+            timeRange.from <= maxTimestamp &&
+            timeRange.to >= minTimestamp &&
+            timeRange.to <= maxTimestamp
+          ) {
+            onTimeRangeChange({
+              from: timeRange.from as number,
+              to: timeRange.to as number,
+            })
+          }
         }
       })
     }
@@ -301,17 +540,23 @@ function BacktestChart({
 
     return () => {
       window.removeEventListener('resize', handleResize)
+      if (clickHandlerRef.current) {
+        chart.unsubscribeClick(clickHandlerRef.current)
+      }
+      chart.unsubscribeCrosshairMove(crosshairMoveHandler)
+      container.removeEventListener('click', containerClickHandler)
       chart.remove()
       chartRef.current = null
       lineSeriesRef.current = null
+      clickHandlerRef.current = null
     }
-  }, [equityData, tradeMarkers, onTimeRangeChange])
+  }, [equityData, tradeMarkers, onTimeRangeChange, decisions, runId])
 
   // Sync time range from external source (e.g., candlestick chart)
   useEffect(() => {
     if (!chartRef.current || !syncTimeRange || isSyncingRef.current) return
     
-    // Validate time range values
+    // Validate time range values - more strict checks
     if (
       syncTimeRange.from == null || 
       syncTimeRange.to == null ||
@@ -319,24 +564,53 @@ function BacktestChart({
       typeof syncTimeRange.to !== 'number' ||
       isNaN(syncTimeRange.from) ||
       isNaN(syncTimeRange.to) ||
-      syncTimeRange.from >= syncTimeRange.to
+      !isFinite(syncTimeRange.from) ||
+      !isFinite(syncTimeRange.to) ||
+      syncTimeRange.from >= syncTimeRange.to ||
+      syncTimeRange.from <= 0 ||
+      syncTimeRange.to <= 0
     ) {
+      console.warn('[BacktestChart] Invalid syncTimeRange:', syncTimeRange)
+      return
+    }
+
+    // Ensure values are valid timestamps (reasonable range: 2000-01-01 to 2100-01-01)
+    const minTimestamp = 946684800 // 2000-01-01
+    const maxTimestamp = 4102444800 // 2100-01-01
+    if (
+      syncTimeRange.from < minTimestamp ||
+      syncTimeRange.from > maxTimestamp ||
+      syncTimeRange.to < minTimestamp ||
+      syncTimeRange.to > maxTimestamp
+    ) {
+      console.warn('[BacktestChart] Time range out of bounds:', syncTimeRange)
       return
     }
 
     try {
       isSyncingRef.current = true
       const timeScale = chartRef.current.timeScale()
+      
+      // Double-check values before setting
+      const fromTime = syncTimeRange.from as Time
+      const toTime = syncTimeRange.to as Time
+      
+      if (fromTime == null || toTime == null) {
+        console.warn('[BacktestChart] Time conversion resulted in null:', { fromTime, toTime })
+        isSyncingRef.current = false
+        return
+      }
+      
       timeScale.setVisibleRange({
-        from: syncTimeRange.from as Time,
-        to: syncTimeRange.to as Time,
+        from: fromTime,
+        to: toTime,
       })
       // Reset flag after a short delay
       setTimeout(() => {
         isSyncingRef.current = false
       }, 100)
     } catch (err) {
-      console.warn('Failed to set visible range:', err)
+      console.warn('[BacktestChart] Failed to set visible range:', err, 'syncTimeRange:', syncTimeRange)
       isSyncingRef.current = false
     }
   }, [syncTimeRange])
@@ -350,11 +624,37 @@ function BacktestChart({
   }
 
   return (
-    <div
-      ref={chartContainerRef}
-      className="w-full rounded-lg overflow-hidden"
-      style={{ background: '#0B0E11', minHeight: 300 }}
-    />
+    <>
+      <div className="relative">
+        <div
+          ref={chartContainerRef}
+          className="w-full rounded-lg overflow-hidden cursor-pointer"
+          style={{ background: '#0B0E11', minHeight: 300 }}
+          title={language === 'zh' ? '点击曲线上的点查看决策思维链' : 'Click on a point to view decision CoT trace'}
+        />
+        {isLoadingDecision && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 rounded-lg">
+            <div className="flex items-center gap-2 px-4 py-2 rounded" style={{ background: '#1E2329', border: '1px solid #2B3139' }}>
+              <RefreshCw className="animate-spin" size={16} style={{ color: '#F0B90B' }} />
+              <span className="text-sm" style={{ color: '#EAECEF' }}>
+                {language === 'zh' ? '加载决策记录...' : 'Loading decision record...'}
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+      <CoTTraceModal
+        isOpen={isModalOpen}
+        onClose={() => {
+          setIsModalOpen(false)
+          setSelectedDecision(null)
+        }}
+        cotTrace={selectedDecision?.cot_trace || ''}
+        cycleNumber={selectedDecision?.cycle_number || 0}
+        timestamp={selectedDecision?.timestamp || ''}
+        language={language}
+      />
+    </>
   )
 }
 
@@ -521,12 +821,26 @@ function CandlestickChartComponent({
               typeof timeRange.to === 'number' &&
               !isNaN(timeRange.from) &&
               !isNaN(timeRange.to) &&
+              isFinite(timeRange.from) &&
+              isFinite(timeRange.to) &&
+              timeRange.from > 0 &&
+              timeRange.to > 0 &&
               timeRange.from < timeRange.to
             ) {
-              onTimeRangeChange({
-                from: timeRange.from as number,
-                to: timeRange.to as number,
-              })
+              // Validate timestamp range (2000-01-01 to 2100-01-01)
+              const minTimestamp = 946684800
+              const maxTimestamp = 4102444800
+              if (
+                timeRange.from >= minTimestamp &&
+                timeRange.from <= maxTimestamp &&
+                timeRange.to >= minTimestamp &&
+                timeRange.to <= maxTimestamp
+              ) {
+                onTimeRangeChange({
+                  from: timeRange.from as number,
+                  to: timeRange.to as number,
+                })
+              }
             }
           })
         }
@@ -559,7 +873,7 @@ function CandlestickChartComponent({
   useEffect(() => {
     if (!chartRef.current || !syncTimeRange || isSyncingRef.current) return
     
-    // Validate time range values
+    // Validate time range values - more strict checks
     if (
       syncTimeRange.from == null || 
       syncTimeRange.to == null ||
@@ -567,24 +881,53 @@ function CandlestickChartComponent({
       typeof syncTimeRange.to !== 'number' ||
       isNaN(syncTimeRange.from) ||
       isNaN(syncTimeRange.to) ||
-      syncTimeRange.from >= syncTimeRange.to
+      !isFinite(syncTimeRange.from) ||
+      !isFinite(syncTimeRange.to) ||
+      syncTimeRange.from >= syncTimeRange.to ||
+      syncTimeRange.from <= 0 ||
+      syncTimeRange.to <= 0
     ) {
+      console.warn('[CandlestickChart] Invalid syncTimeRange:', syncTimeRange)
+      return
+    }
+
+    // Ensure values are valid timestamps (reasonable range: 2000-01-01 to 2100-01-01)
+    const minTimestamp = 946684800 // 2000-01-01
+    const maxTimestamp = 4102444800 // 2100-01-01
+    if (
+      syncTimeRange.from < minTimestamp ||
+      syncTimeRange.from > maxTimestamp ||
+      syncTimeRange.to < minTimestamp ||
+      syncTimeRange.to > maxTimestamp
+    ) {
+      console.warn('[CandlestickChart] Time range out of bounds:', syncTimeRange)
       return
     }
 
     try {
       isSyncingRef.current = true
       const timeScale = chartRef.current.timeScale()
+      
+      // Double-check values before setting
+      const fromTime = syncTimeRange.from as Time
+      const toTime = syncTimeRange.to as Time
+      
+      if (fromTime == null || toTime == null) {
+        console.warn('[CandlestickChart] Time conversion resulted in null:', { fromTime, toTime })
+        isSyncingRef.current = false
+        return
+      }
+      
       timeScale.setVisibleRange({
-        from: syncTimeRange.from as Time,
-        to: syncTimeRange.to as Time,
+        from: fromTime,
+        to: toTime,
       })
       // Reset flag after a short delay
       setTimeout(() => {
         isSyncingRef.current = false
       }, 100)
     } catch (err) {
-      console.warn('Failed to set visible range:', err)
+      console.warn('[CandlestickChart] Failed to set visible range:', err, 'syncTimeRange:', syncTimeRange)
       isSyncingRef.current = false
     }
   }, [syncTimeRange])
@@ -2014,8 +2357,11 @@ export function BacktestPage() {
                             <BacktestChart 
                               equity={equity} 
                               trades={trades ?? []}
+                              decisions={decisions}
+                              runId={selectedRunId}
                               onTimeRangeChange={setSyncTimeRange}
                               syncTimeRange={syncTimeRange}
+                              language={language}
                             />
                           ) : (
                             <div className="py-12 text-center" style={{ color: '#5E6673' }}>
@@ -2081,8 +2427,11 @@ export function BacktestPage() {
                               <BacktestChart 
                                 equity={equity} 
                                 trades={trades ?? []}
+                                decisions={decisions}
+                                runId={selectedRunId}
                                 onTimeRangeChange={setSyncTimeRange}
                                 syncTimeRange={syncTimeRange}
+                                language={language}
                               />
                             ) : (
                               <div className="py-12 text-center" style={{ color: '#5E6673' }}>

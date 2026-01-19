@@ -206,7 +206,13 @@ func (cfg *BacktestConfig) ToStrategyConfig() *store.StrategyConfig {
 		// Override timeframes with backtest config
 		if len(cfg.Timeframes) > 0 {
 			result.Indicators.Klines.SelectedTimeframes = cfg.Timeframes
-			result.Indicators.Klines.PrimaryTimeframe = cfg.Timeframes[0]
+			// Use DecisionTimeframe as PrimaryTimeframe (not Timeframes[0])
+			// This ensures the strategy engine uses the same timeframe as the backtest decision cycle
+			if cfg.DecisionTimeframe != "" {
+				result.Indicators.Klines.PrimaryTimeframe = cfg.DecisionTimeframe
+			} else {
+				result.Indicators.Klines.PrimaryTimeframe = cfg.Timeframes[0]
+			}
 			if len(cfg.Timeframes) > 1 {
 				result.Indicators.Klines.LongerTimeframe = cfg.Timeframes[len(cfg.Timeframes)-1]
 			}
@@ -232,7 +238,11 @@ func (cfg *BacktestConfig) ToStrategyConfig() *store.StrategyConfig {
 	// Fallback: build strategy config from backtest config (original logic)
 	primaryTF := "5m"
 	longerTF := "4h"
-	if len(cfg.Timeframes) > 0 {
+	// Use DecisionTimeframe as primaryTF (not Timeframes[0])
+	// This ensures the strategy engine uses the same timeframe as the backtest decision cycle
+	if cfg.DecisionTimeframe != "" {
+		primaryTF = cfg.DecisionTimeframe
+	} else if len(cfg.Timeframes) > 0 {
 		primaryTF = cfg.Timeframes[0]
 	}
 	if len(cfg.Timeframes) > 1 {
@@ -283,3 +293,4 @@ func (cfg *BacktestConfig) ToStrategyConfig() *store.StrategyConfig {
 		},
 	}
 }
+
