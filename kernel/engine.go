@@ -1059,6 +1059,16 @@ func (e *StrategyEngine) writeAvailableIndicators(sb *strings.Builder) {
 		sb.WriteString("\n")
 	}
 
+	if indicators.EnableKDJ {
+		sb.WriteString("- KDJ (K, D, J)")
+		if len(indicators.KDJPeriods) >= 3 {
+			sb.WriteString(fmt.Sprintf(" (periods: %v)", indicators.KDJPeriods))
+		} else {
+			sb.WriteString(" (periods: [9, 3, 3])")
+		}
+		sb.WriteString("\n")
+	}
+
 	if indicators.EnableVolume {
 		sb.WriteString("- Volume data\n")
 	}
@@ -1556,6 +1566,10 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 		sb.WriteString(fmt.Sprintf(", current_rsi7 = %.3f", data.CurrentRSI7))
 	}
 
+	if indicators.EnableKDJ {
+		sb.WriteString(fmt.Sprintf(", current_k = %.3f, current_d = %.3f, current_j = %.3f", data.CurrentK, data.CurrentD, data.CurrentJ))
+	}
+
 	sb.WriteString("\n\n")
 
 	if indicators.EnableOI || indicators.EnableFundingRate {
@@ -1606,6 +1620,18 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 				}
 			}
 
+			if indicators.EnableKDJ {
+				if len(data.IntradaySeries.KValues) > 0 {
+					sb.WriteString(fmt.Sprintf("KDJ K: %s\n\n", formatFloatSlice(data.IntradaySeries.KValues)))
+				}
+				if len(data.IntradaySeries.DValues) > 0 {
+					sb.WriteString(fmt.Sprintf("KDJ D: %s\n\n", formatFloatSlice(data.IntradaySeries.DValues)))
+				}
+				if len(data.IntradaySeries.JValues) > 0 {
+					sb.WriteString(fmt.Sprintf("KDJ J: %s\n\n", formatFloatSlice(data.IntradaySeries.JValues)))
+				}
+			}
+
 			if indicators.EnableVolume && len(data.IntradaySeries.Volume) > 0 {
 				sb.WriteString(fmt.Sprintf("Volume: %s\n\n", formatFloatSlice(data.IntradaySeries.Volume)))
 			}
@@ -1639,6 +1665,18 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 
 			if indicators.EnableRSI && len(data.LongerTermContext.RSI14Values) > 0 {
 				sb.WriteString(fmt.Sprintf("RSI indicators (14-Period): %s\n\n", formatFloatSlice(data.LongerTermContext.RSI14Values)))
+			}
+
+			if indicators.EnableKDJ {
+				if len(data.LongerTermContext.KValues) > 0 {
+					sb.WriteString(fmt.Sprintf("KDJ K: %s\n\n", formatFloatSlice(data.LongerTermContext.KValues)))
+				}
+				if len(data.LongerTermContext.DValues) > 0 {
+					sb.WriteString(fmt.Sprintf("KDJ D: %s\n\n", formatFloatSlice(data.LongerTermContext.DValues)))
+				}
+				if len(data.LongerTermContext.JValues) > 0 {
+					sb.WriteString(fmt.Sprintf("KDJ J: %s\n\n", formatFloatSlice(data.LongerTermContext.JValues)))
+				}
 			}
 		}
 	}
@@ -1697,6 +1735,18 @@ func (e *StrategyEngine) formatTimeframeSeriesData(sb *strings.Builder, data *ma
 		sb.WriteString(fmt.Sprintf("BOLL Upper: %s\n", formatFloatSlice(data.BOLLUpper)))
 		sb.WriteString(fmt.Sprintf("BOLL Middle: %s\n", formatFloatSlice(data.BOLLMiddle)))
 		sb.WriteString(fmt.Sprintf("BOLL Lower: %s\n", formatFloatSlice(data.BOLLLower)))
+	}
+
+	if indicators.EnableKDJ {
+		if len(data.KValues) > 0 {
+			sb.WriteString(fmt.Sprintf("KDJ K: %s\n", formatFloatSlice(data.KValues)))
+		}
+		if len(data.DValues) > 0 {
+			sb.WriteString(fmt.Sprintf("KDJ D: %s\n", formatFloatSlice(data.DValues)))
+		}
+		if len(data.JValues) > 0 {
+			sb.WriteString(fmt.Sprintf("KDJ J: %s\n", formatFloatSlice(data.JValues)))
+		}
 	}
 
 	sb.WriteString("\n")

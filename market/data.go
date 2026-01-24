@@ -191,6 +191,7 @@ func Get(symbol string) (*Data, error) {
 	currentEMA20 := calculateEMA(klines3m, 20)
 	currentMACD := calculateMACD(klines3m)
 	currentRSI7 := calculateRSI(klines3m, 7)
+	currentK, currentD, currentJ := calculateKDJ(klines3m, 9, 3, 3)
 
 	// Calculate price change percentage
 	// 1-hour price change = price from 20 3-minute K-lines ago
@@ -235,6 +236,9 @@ func Get(symbol string) (*Data, error) {
 		CurrentEMA20:      currentEMA20,
 		CurrentMACD:       currentMACD,
 		CurrentRSI7:       currentRSI7,
+		CurrentK:          currentK,
+		CurrentD:          currentD,
+		CurrentJ:          currentJ,
 		OpenInterest:      oiData,
 		FundingRate:       fundingRate,
 		IntradaySeries:    intradayData,
@@ -329,6 +333,7 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 	currentEMA20 := calculateEMA(primaryKlines, 20)
 	currentMACD := calculateMACD(primaryKlines)
 	currentRSI7 := calculateRSI(primaryKlines, 7)
+	currentK, currentD, currentJ := calculateKDJ(primaryKlines, 9, 3, 3)
 
 	// Calculate price changes
 	priceChange1h := calculatePriceChangeByBars(primaryKlines, primaryTimeframe, 60) // 1 hour
@@ -351,6 +356,9 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 		CurrentEMA20:  currentEMA20,
 		CurrentMACD:   currentMACD,
 		CurrentRSI7:   currentRSI7,
+		CurrentK:      currentK,
+		CurrentD:      currentD,
+		CurrentJ:      currentJ,
 		OpenInterest:  oiData,
 		FundingRate:   fundingRate,
 		TimeframeData: timeframeData,
@@ -376,6 +384,9 @@ func calculateTimeframeSeries(klines []Kline, timeframe string, count int) *Time
 		BOLLUpper:   make([]float64, 0, count),
 		BOLLMiddle:  make([]float64, 0, count),
 		BOLLLower:   make([]float64, 0, count),
+		KValues:     make([]float64, 0, count),
+		DValues:     make([]float64, 0, count),
+		JValues:     make([]float64, 0, count),
 	}
 
 	// Get latest N data points based on count from config
@@ -433,6 +444,14 @@ func calculateTimeframeSeries(klines []Kline, timeframe string, count int) *Time
 			data.BOLLUpper = append(data.BOLLUpper, upper)
 			data.BOLLMiddle = append(data.BOLLMiddle, middle)
 			data.BOLLLower = append(data.BOLLLower, lower)
+		}
+
+		// Calculate KDJ (9,3,3)
+		if i >= 8 {
+			k, d, j := calculateKDJ(klines[:i+1], 9, 3, 3)
+			data.KValues = append(data.KValues, k)
+			data.DValues = append(data.DValues, d)
+			data.JValues = append(data.JValues, j)
 		}
 	}
 
@@ -653,6 +672,42 @@ func calculateBOLL(klines []Kline, period int, multiplier float64) (upper, middl
 	return upper, middle, lower
 }
 
+// calculateKDJ calculates KDJ (K, D, J). n=RSV period, m1=K smoothing, m2=D smoothing. Default 9,3,3.
+// RSV = (C - Ln) / (Hn - Ln) * 100; K = (m1-1)/m1*K_prev + 1/m1*RSV; D = (m2-1)/m2*D_prev + 1/m2*K; J = 3*K - 2*D.
+// When Hn==Ln, RSV=50. Initial K0=D0=50.
+func calculateKDJ(klines []Kline, n, m1, m2 int) (k, d, j float64) {
+	if len(klines) < n || n < 1 {
+		return 0, 0, 0
+	}
+	if m1 < 1 {
+		m1 = 3
+	}
+	if m2 < 1 {
+		m2 = 3
+	}
+	K, D := 50.0, 50.0
+	for i := n - 1; i < len(klines); i++ {
+		Hn := klines[i].High
+		Ln := klines[i].Low
+		for idx := i - n + 1; idx < i; idx++ {
+			if klines[idx].High > Hn {
+				Hn = klines[idx].High
+			}
+			if klines[idx].Low < Ln {
+				Ln = klines[idx].Low
+			}
+		}
+		rsv := 50.0
+		if Hn > Ln {
+			rsv = (klines[i].Close - Ln) / (Hn - Ln) * 100
+		}
+		K = (float64(m1-1)/float64(m1))*K + (1.0/float64(m1))*rsv
+		D = (float64(m2-1)/float64(m2))*D + (1.0/float64(m2))*K
+		j = 3*K - 2*D
+	}
+	return K, D, j
+}
+
 // calculateIntradaySeries calculates intraday series data
 func calculateIntradaySeries(klines []Kline) *IntradayData {
 	data := &IntradayData{
@@ -661,6 +716,9 @@ func calculateIntradaySeries(klines []Kline) *IntradayData {
 		MACDValues:  make([]float64, 0, 10),
 		RSI7Values:  make([]float64, 0, 10),
 		RSI14Values: make([]float64, 0, 10),
+		KValues:     make([]float64, 0, 10),
+		DValues:     make([]float64, 0, 10),
+		JValues:     make([]float64, 0, 10),
 		Volume:      make([]float64, 0, 10),
 	}
 
@@ -695,6 +753,14 @@ func calculateIntradaySeries(klines []Kline) *IntradayData {
 			rsi14 := calculateRSI(klines[:i+1], 14)
 			data.RSI14Values = append(data.RSI14Values, rsi14)
 		}
+
+		// Calculate KDJ (9,3,3)
+		if i >= 8 {
+			k, d, j := calculateKDJ(klines[:i+1], 9, 3, 3)
+			data.KValues = append(data.KValues, k)
+			data.DValues = append(data.DValues, d)
+			data.JValues = append(data.JValues, j)
+		}
 	}
 
 	// Calculate 3m ATR14
@@ -708,6 +774,9 @@ func calculateLongerTermData(klines []Kline) *LongerTermData {
 	data := &LongerTermData{
 		MACDValues:  make([]float64, 0, 10),
 		RSI14Values: make([]float64, 0, 10),
+		KValues:     make([]float64, 0, 10),
+		DValues:     make([]float64, 0, 10),
+		JValues:     make([]float64, 0, 10),
 	}
 
 	// Calculate EMA
@@ -743,6 +812,12 @@ func calculateLongerTermData(klines []Kline) *LongerTermData {
 		if i >= 14 {
 			rsi14 := calculateRSI(klines[:i+1], 14)
 			data.RSI14Values = append(data.RSI14Values, rsi14)
+		}
+		if i >= 8 {
+			k, d, j := calculateKDJ(klines[:i+1], 9, 3, 3)
+			data.KValues = append(data.KValues, k)
+			data.DValues = append(data.DValues, d)
+			data.JValues = append(data.JValues, j)
 		}
 	}
 
@@ -1101,12 +1176,16 @@ func BuildDataFromKlines(symbol string, primary []Kline, longer []Kline) (*Data,
 	current := primary[len(primary)-1]
 	currentPrice := current.Close
 
+	k, d, j := calculateKDJ(primary, 9, 3, 3)
 	data := &Data{
 		Symbol:            symbol,
 		CurrentPrice:      currentPrice,
 		CurrentEMA20:      calculateEMA(primary, 20),
 		CurrentMACD:       calculateMACD(primary),
 		CurrentRSI7:       calculateRSI(primary, 7),
+		CurrentK:          k,
+		CurrentD:          d,
+		CurrentJ:          j,
 		PriceChange1h:     priceChangeFromSeries(primary, time.Hour),
 		PriceChange4h:     priceChangeFromSeries(primary, 4*time.Hour),
 		OpenInterest:      &OIData{Latest: 0, Average: 0},
@@ -1209,4 +1288,9 @@ func ExportCalculateATR(klines []Kline, period int) float64 {
 // ExportCalculateBOLL exports calculateBOLL for testing
 func ExportCalculateBOLL(klines []Kline, period int, multiplier float64) (upper, middle, lower float64) {
 	return calculateBOLL(klines, period, multiplier)
+}
+
+// ExportCalculateKDJ exports calculateKDJ for testing
+func ExportCalculateKDJ(klines []Kline, n, m1, m2 int) (k, d, j float64) {
+	return calculateKDJ(klines, n, m1, m2)
 }

@@ -72,6 +72,8 @@ export function IndicatorEditor({
       atrDesc: { zh: '真实波幅均值', en: 'Average True Range' },
       boll: { zh: 'BOLL 布林带', en: 'Bollinger Bands' },
       bollDesc: { zh: '布林带指标（上中下轨）', en: 'Upper/Middle/Lower Bands' },
+      kdj: { zh: 'KDJ', en: 'KDJ' },
+      kdjDesc: { zh: '随机指标（K、D、J 线）', en: 'Stochastic (K, D, J lines)' },
       volume: { zh: '成交量', en: 'Volume' },
       volumeDesc: { zh: '交易量分析', en: 'Trading volume analysis' },
       oi: { zh: '持仓量', en: 'Open Interest' },
@@ -673,6 +675,7 @@ export function IndicatorEditor({
               { key: 'enable_rsi', label: 'rsi', desc: 'rsiDesc', color: '#F6465D', periodKey: 'rsi_periods', defaultPeriods: '7,14' },
               { key: 'enable_atr', label: 'atr', desc: 'atrDesc', color: '#60a5fa', periodKey: 'atr_periods', defaultPeriods: '14' },
               { key: 'enable_boll', label: 'boll', desc: 'bollDesc', color: '#ec4899', periodKey: 'boll_periods', defaultPeriods: '20' },
+              { key: 'enable_kdj', label: 'kdj', desc: 'kdjDesc', color: '#14b8a6', periodKey: 'kdj_periods', defaultPeriods: '9,3,3' },
             ].map(({ key, label, desc, color, periodKey, defaultPeriods }) => (
               <div
                 key={key}

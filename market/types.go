@@ -11,6 +11,9 @@ type Data struct {
 	CurrentEMA20      float64
 	CurrentMACD       float64
 	CurrentRSI7       float64
+	CurrentK          float64 // KDJ K value
+	CurrentD          float64 // KDJ D value
+	CurrentJ          float64 // KDJ J value
 	OpenInterest      *OIData
 	FundingRate       float64
 	IntradaySeries    *IntradayData
@@ -45,6 +48,10 @@ type TimeframeSeriesData struct {
 	BOLLUpper  []float64 `json:"boll_upper"`  // Upper band
 	BOLLMiddle []float64 `json:"boll_middle"` // Middle band (SMA)
 	BOLLLower  []float64 `json:"boll_lower"`  // Lower band
+	// KDJ (default 9,3,3)
+	KValues []float64 `json:"k_values"` // K line
+	DValues []float64 `json:"d_values"` // D line
+	JValues []float64 `json:"j_values"` // J line
 }
 
 // OIData Open Interest data
@@ -60,6 +67,9 @@ type IntradayData struct {
 	MACDValues  []float64
 	RSI7Values  []float64
 	RSI14Values []float64
+	KValues     []float64 // KDJ K
+	DValues     []float64 // KDJ D
+	JValues     []float64 // KDJ J
 	Volume      []float64
 	ATR14       float64
 }
@@ -74,6 +84,9 @@ type LongerTermData struct {
 	AverageVolume float64
 	MACDValues    []float64
 	RSI14Values   []float64
+	KValues       []float64 // KDJ K
+	DValues       []float64 // KDJ D
+	JValues       []float64 // KDJ J
 }
 
 // Binance API response structure

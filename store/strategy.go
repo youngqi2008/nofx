@@ -90,6 +90,7 @@ type IndicatorConfig struct {
 	EnableRSI         bool `json:"enable_rsi"`
 	EnableATR         bool `json:"enable_atr"`
 	EnableBOLL        bool `json:"enable_boll"`         // Bollinger Bands
+	EnableKDJ         bool `json:"enable_kdj"`          // KDJ (Stochastic oscillator)
 	EnableVolume      bool `json:"enable_volume"`
 	EnableOI          bool `json:"enable_oi"`           // open interest
 	EnableFundingRate bool `json:"enable_funding_rate"` // funding rate
@@ -101,6 +102,8 @@ type IndicatorConfig struct {
 	ATRPeriods []int `json:"atr_periods,omitempty"` // default [14]
 	// BOLL period configuration (period, standard deviation multiplier is fixed at 2)
 	BOLLPeriods []int `json:"boll_periods,omitempty"` // default [20] - can select multiple timeframes
+	// KDJ period configuration: [RSV period, K smoothing, D smoothing], default [9, 3, 3]
+	KDJPeriods []int `json:"kdj_periods,omitempty"` // default [9, 3, 3]
 	// external data sources
 	ExternalDataSources []ExternalDataSource `json:"external_data_sources,omitempty"`
 
@@ -229,6 +232,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			EnableRSI:         false,
 			EnableATR:         false,
 			EnableBOLL:        false,
+			EnableKDJ:         false,
 			EnableVolume:      true,
 			EnableOI:          true,
 			EnableFundingRate: true,
@@ -236,6 +240,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			RSIPeriods:        []int{7, 14},
 			ATRPeriods:        []int{14},
 			BOLLPeriods:       []int{20},
+			KDJPeriods:        []int{9, 3, 3},
 			// NofxOS unified API key
 			NofxOSAPIKey: "cm_568c67eae410d912c54c",
 			// Quant data

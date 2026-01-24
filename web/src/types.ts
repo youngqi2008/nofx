@@ -493,6 +493,7 @@ export interface IndicatorConfig {
   enable_rsi: boolean;
   enable_atr: boolean;
   enable_boll: boolean;
+  enable_kdj: boolean;
   enable_volume: boolean;
   enable_oi: boolean;
   enable_funding_rate: boolean;
@@ -500,6 +501,7 @@ export interface IndicatorConfig {
   rsi_periods?: number[];
   atr_periods?: number[];
   boll_periods?: number[];
+  kdj_periods?: number[];  // [RSV period, K smoothing, D smoothing], default [9,3,3]
   external_data_sources?: ExternalDataSource[];
 
   // ========== AresOS 数据源统一配置 ==========

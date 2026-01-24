@@ -174,6 +174,54 @@ export function calculateRSI(data: Kline[], period = 14): Array<{ time: number; 
   return result
 }
 
+// KDJ 指标 (n=RSV周期, m1=K平滑, m2=D平滑，默认9,3,3)
+export interface KDJData {
+  time: number
+  k: number
+  d: number
+  j: number
+}
+
+export function calculateKDJ(
+  data: Kline[],
+  n = 9,
+  m1 = 3,
+  m2 = 3
+): KDJData[] {
+  const result: KDJData[] = []
+  if (data.length < n || n < 1) return result
+  const m1f = Math.max(1, m1)
+  const m2f = Math.max(1, m2)
+
+  let K = 50
+  let D = 50
+
+  for (let i = n - 1; i < data.length; i++) {
+    let Hn = data[i].high
+    let Ln = data[i].low
+    for (let j = i - n + 1; j < i; j++) {
+      if (data[j].high > Hn) Hn = data[j].high
+      if (data[j].low < Ln) Ln = data[j].low
+    }
+    let rsv = 50
+    if (Hn > Ln) {
+      rsv = ((data[i].close - Ln) / (Hn - Ln)) * 100
+    }
+    K = ((m1f - 1) / m1f) * K + (1 / m1f) * rsv
+    D = ((m2f - 1) / m2f) * D + (1 / m2f) * K
+    const j = 3 * K - 2 * D
+
+    result.push({
+      time: data[i].time,
+      k: K,
+      d: D,
+      j,
+    })
+  }
+
+  return result
+}
+
 // 布林带
 export interface BollingerBands {
   time: number
