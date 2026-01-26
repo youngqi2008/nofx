@@ -41,10 +41,40 @@ echo -e "${GREEN}Generating self-signed certificate for: ${DOMAIN}${NC}"
 # Generate private key
 openssl genrsa -out "$SSL_DIR/key.pem" 2048
 
+# Create temporary OpenSSL config file for compatibility with older OpenSSL versions
+CONFIG_FILE=$(mktemp)
+cat > "$CONFIG_FILE" <<EOF
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+C = US
+ST = State
+L = City
+O = NOFX
+CN = ${DOMAIN}
+
+[v3_req]
+keyUsage = digitalSignature, keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth, clientAuth
+subjectAltName = @alt_names
+basicConstraints = CA:FALSE
+
+[alt_names]
+DNS.1 = ${DOMAIN}
+IP.1 = ${DOMAIN}
+IP.2 = 127.0.0.1
+IP.3 = ::1
+EOF
+
 # Generate certificate signing request and certificate
 openssl req -new -x509 -key "$SSL_DIR/key.pem" -out "$SSL_DIR/cert.pem" -days 365 \
-    -subj "/C=US/ST=State/L=City/O=NOFX/CN=${DOMAIN}" \
-    -addext "subjectAltName=DNS:${DOMAIN},DNS:*.${DOMAIN},IP:127.0.0.1,IP:::1"
+    -config "$CONFIG_FILE" -extensions v3_req
+
+# Clean up temporary config file
+rm -f "$CONFIG_FILE"
 
 # Set proper permissions
 chmod 600 "$SSL_DIR/key.pem"
@@ -63,3 +93,4 @@ echo ""
 echo "To use with docker-compose, ensure the ssl directory is mounted:"
 echo "  volumes:"
 echo "    - ./ssl:/etc/nginx/ssl:ro"
+

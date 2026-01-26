@@ -22,10 +22,10 @@ database_backups/
 *.sqlite
 *.sqlite3
 
-nofx-auto
+#nofx-auto
 *.exe
-nofx
-nofx_test
+#nofx
+#nofx_test
 
 web/.cache/
 
