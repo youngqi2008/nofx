@@ -93,8 +93,10 @@ type Context struct {
 	Positions       []PositionInfo          `json:"positions"`
 	CandidateCoins  []CandidateCoin         `json:"candidate_coins"`
 	MarketDataMap   map[string]*market.Data `json:"-"` // 不序列化，但内部使用
-	OITopDataMap    map[string]*OITopData            `json:"-"` // OI Top数据映射
-	Performance        interface{}                      `json:"-"` // 历史表现分析（logger.PerformanceAnalysis）
+	OITopDataMap    map[string]*OITopData   `json:"-"` // OI Top数据映射
+	// AggregateConfig 前端选中的时间序列与市场指标，仅计算/输出这些；nil 表示全部
+	AggregateConfig *market.AggregateConfig `json:"-"`
+	Performance     interface{}            `json:"-"` // 历史表现分析（logger.PerformanceAnalysis）
 	TradeHistory       map[string][]map[string]interface{} `json:"-"` // 过去24小时的历史订单数据 (symbol -> trades)
 	TodayTradeHistory  map[string][]map[string]interface{} `json:"-"` // 今天0点到现在的自然日交易数据 (symbol -> trades)
 	TradeStats24H      *TradeStatistics                  `json:"-"` // 过去24小时交易统计
@@ -261,7 +263,7 @@ func fetchMarketDataForContext(ctx *Context) error {
 	}
 
 	for symbol := range symbolSet {
-		data, err := market.Get(symbol)
+		data, err := market.GetWithTimeframeAggregates(symbol, ctx.AggregateConfig)
 		if err != nil {
 			// 单个币种失败不影响整体，只记录错误
 			continue
@@ -484,9 +486,9 @@ func buildUserPrompt(ctx *Context) string {
 				pos.EntryPrice, pos.MarkPrice, pos.Quantity, positionValue, pos.UnrealizedPnLPct, pos.UnrealizedPnL, pos.PeakPnLPct,
 				pos.Leverage, pos.MarginUsed, pos.LiquidationPrice, holdingDuration))
 
-			// 使用FormatMarketData输出完整市场数据
+			// 按币种输出汇总数据：当前时刻 + 各周期 10/6 根 K 线 min/max/avg（按前端配置的周期与指标）
 			if marketData, ok := ctx.MarketDataMap[pos.Symbol]; ok {
-				sb.WriteString(market.Format(marketData))
+				sb.WriteString(market.FormatSummary(marketData, ctx.AggregateConfig))
 				sb.WriteString("\n")
 			}
 		}
@@ -494,7 +496,7 @@ func buildUserPrompt(ctx *Context) string {
 		sb.WriteString("当前持仓: 无\n\n")
 	}
 
-	// 候选币种（完整市场数据）
+	// 候选币种（汇总数据：当前时刻 + 各周期 10/6 根 K 线汇总）
 	sb.WriteString(fmt.Sprintf("## 候选币种 (%d个)\n\n", len(ctx.MarketDataMap)))
 	displayedCount := 0
 	for _, coin := range ctx.CandidateCoins {
@@ -511,9 +513,8 @@ func buildUserPrompt(ctx *Context) string {
 			sourceTags = " (OI_Top持仓增长)"
 		}
 
-		// 使用FormatMarketData输出完整市场数据
 		sb.WriteString(fmt.Sprintf("### %d. %s%s\n\n", displayedCount, coin.Symbol, sourceTags))
-		sb.WriteString(market.Format(marketData))
+		sb.WriteString(market.FormatSummary(marketData, ctx.AggregateConfig))
 		sb.WriteString("\n")
 	}
 	sb.WriteString("\n")
@@ -623,6 +624,10 @@ func buildUserPrompt(ctx *Context) string {
 		}
 		sb.WriteString("\n")
 	}
+
+	// 上一轮决策上下文（保持结构，便于后续接入上一轮决策摘要）
+	sb.WriteString("## 上一轮决策上下文\n\n")
+	sb.WriteString("(本周期首次决策或无上一轮时此处为空；若有上一轮决策将在此展示)\n\n")
 
 	sb.WriteString("---\n\n")
 	sb.WriteString("现在请分析并输出决策（思维链 + JSON）\n")

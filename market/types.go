@@ -9,12 +9,57 @@ type Data struct {
 	PriceChange1h     float64 // 1小时价格变化百分比
 	PriceChange4h     float64 // 4小时价格变化百分比
 	CurrentEMA20      float64
+	CurrentEMA50      float64
 	CurrentMACD       float64
 	CurrentRSI7       float64
+	CurrentRSI14      float64
+	CurrentKDJK      float64
+	CurrentKDJD      float64
+	CurrentKDJJ      float64
 	OpenInterest      *OIData
 	FundingRate       float64
 	IntradaySeries    *IntradayData
 	LongerTermContext *LongerTermData
+	// TimeframeAggregates 各周期最近10根/6根K线的指标汇总（min/max/avg），用于 User Prompt 汇总展示
+	TimeframeAggregates map[string]*TimeframeAggregate
+	TradeHistory        []map[string]interface{} `json:"-"` // 可选：该币种历史成交，由 decision 层注入
+}
+
+// TimeframeAggregate 某周期下最近 N 根 K 线的指标汇总（最小值、最大值、平均值）
+type TimeframeAggregate struct {
+	Timeframe string
+	// Last10 最近 10 根 K 线
+	Last10 IndicatorStats
+	// Last6 最近 6 根 K 线
+	Last6 IndicatorStats
+}
+
+// IndicatorStats 单组 K 线内的指标统计
+type IndicatorStats struct {
+	PriceMin, PriceMax, PriceAvg       float64
+	EMA20Min, EMA20Max, EMA20Avg      float64
+	MACDMin, MACDMax, MACDAvg        float64
+	RSI7Min, RSI7Max, RSI7Avg         float64
+	RSI14Min, RSI14Max, RSI14Avg      float64
+	ATR14Min, ATR14Max, ATR14Avg     float64
+	BOLLUpperMin, BOLLUpperMax, BOLLUpperAvg float64
+	BOLLMidMin, BOLLMidMax, BOLLMidAvg       float64
+	BOLLLowerMin, BOLLLowerMax, BOLLLowerAvg float64
+	KDJKMin, KDJKMax, KDJKAvg         float64
+	KDJDMin, KDJDMax, KDJDAvg         float64
+	KDJJMin, KDJJMax, KDJJAvg         float64
+	VolumeMin, VolumeMax, VolumeAvg   float64
+}
+
+// AggregateConfig 汇总配置：前端选中的时间序列与市场指标，仅计算并输出这些
+// 与前端 IndicatorConfigPanel 的 indicators / timeframes 对应
+type AggregateConfig struct {
+	// Timeframes 选中的周期，如 ["1m","3m","5m","15m","30m","1h","4h","1d"]，空则使用默认全部
+	Timeframes []string `json:"timeframes"`
+	// Indicators 选中的指标 id：ema, macd, rsi, atr, volume, bollinger, kdj；空则使用默认全部
+	Indicators []string `json:"indicators"`
+	// DataPoints 各周期 K 线数量（可选），用于拉取足够长度
+	DataPoints map[string]int `json:"data_points,omitempty"`
 }
 
 // OIData Open Interest数据

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"nofx/config"
+	"nofx/market"
 	"nofx/trader"
 	"sort"
 	"strconv"
@@ -13,6 +14,18 @@ import (
 	"sync"
 	"time"
 )
+
+// parseIndicatorConfig 将 DB 中的 indicator_config JSON 转为 market.AggregateConfig；空或解析失败返回 nil（表示全部周期/指标）
+func parseIndicatorConfig(raw string) *market.AggregateConfig {
+	if raw == "" {
+		return nil
+	}
+	var cfg market.AggregateConfig
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return nil
+	}
+	return &cfg
+}
 
 // CompetitionCache 竞赛数据缓存
 type CompetitionCache struct {
@@ -239,6 +252,7 @@ func (tm *TraderManager) addTraderFromDB(traderCfg *config.TraderRecord, aiModel
 		DefaultCoins:          defaultCoins,
 		TradingCoins:          tradingCoins,
 		SystemPromptTemplate:  traderCfg.SystemPromptTemplate, // 系统提示词模板
+		IndicatorConfig:       parseIndicatorConfig(traderCfg.IndicatorConfig),
 	}
 
 	// 根据交易所类型设置API密钥
@@ -345,6 +359,7 @@ func (tm *TraderManager) AddTraderFromDB(traderCfg *config.TraderRecord, aiModel
 		IsCrossMargin:         traderCfg.IsCrossMargin,
 		DefaultCoins:          defaultCoins,
 		TradingCoins:          tradingCoins,
+		IndicatorConfig:       parseIndicatorConfig(traderCfg.IndicatorConfig),
 	}
 
 	// 根据交易所类型设置API密钥

@@ -684,6 +684,7 @@ type UpdateTraderRequest struct {
 	OverrideBasePrompt   bool    `json:"override_base_prompt"`
 	SystemPromptTemplate string  `json:"system_prompt_template"`
 	IsCrossMargin        *bool   `json:"is_cross_margin"`
+	IndicatorConfig      interface{} `json:"indicator_config"` // 前端对象 { timeframes, indicators, data_points } 或 JSON 字符串
 }
 
 // handleUpdateTrader 更新交易员配置
@@ -747,6 +748,20 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		systemPromptTemplate = existingTrader.SystemPromptTemplate // 如果请求中没有提供，保持原值
 	}
 
+	indicatorConfig := existingTrader.IndicatorConfig
+	if req.IndicatorConfig != nil {
+		switch v := req.IndicatorConfig.(type) {
+		case string:
+			if v != "" {
+				indicatorConfig = v
+			}
+		default:
+			if b, err := json.Marshal(req.IndicatorConfig); err == nil && len(b) > 0 {
+				indicatorConfig = string(b)
+			}
+		}
+	}
+
 	// 更新交易员配置
 	trader := &config.TraderRecord{
 		ID:                   traderID,
@@ -762,6 +777,7 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		OverrideBasePrompt:   req.OverrideBasePrompt,
 		SystemPromptTemplate: systemPromptTemplate,
 		IsCrossMargin:        isCrossMargin,
+		IndicatorConfig:      indicatorConfig,
 		ScanIntervalMinutes:  scanIntervalMinutes,
 		IsRunning:            existingTrader.IsRunning, // 保持原值
 	}
@@ -1293,6 +1309,9 @@ func (s *Server) handleGetTraderConfig(c *gin.Context) {
 		"use_coin_pool":          traderConfig.UseCoinPool,
 		"use_oi_top":             traderConfig.UseOITop,
 		"is_running":             isRunning,
+	}
+	if traderConfig.IndicatorConfig != "" {
+		result["indicator_config"] = traderConfig.IndicatorConfig
 	}
 
 	c.JSON(http.StatusOK, result)

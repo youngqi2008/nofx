@@ -75,6 +75,9 @@ type AutoTraderConfig struct {
 
 	// 系统提示词模板
 	SystemPromptTemplate string // 系统提示词模板名称（如 "default", "aggressive"）
+
+	// 前端选中的时间序列与市场指标，仅计算/输出这些；nil 表示全部周期、全部指标
+	IndicatorConfig *market.AggregateConfig
 }
 
 // AutoTrader 自动交易器
@@ -719,6 +722,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		TodayTradeHistory: todayTradeHistory, // 添加今天0点到现在的交易数据
 		TradeStats24H:      tradeStats24H,     // 过去24小时交易统计
 		TodayTradeStats:    todayTradeStats,   // 当日自然日交易统计
+		AggregateConfig:    at.config.IndicatorConfig, // 前端选中的周期与指标，nil 则全部
 	}
 
 	return ctx, nil

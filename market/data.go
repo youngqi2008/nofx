@@ -59,8 +59,11 @@ func Get(symbol string) (*Data, error) {
 	// 计算当前指标 (基于3分钟最新数据)
 	currentPrice := klines3m[len(klines3m)-1].Close
 	currentEMA20 := calculateEMA(klines3m, 20)
+	currentEMA50 := calculateEMA(klines3m, 50)
 	currentMACD := calculateMACD(klines3m)
 	currentRSI7 := calculateRSI(klines3m, 7)
+	currentRSI14 := calculateRSI(klines3m, 14)
+	currentK, currentD, currentJ := calculateKDJ(klines3m)
 
 	// 计算价格变化百分比
 	// 1小时价格变化 = 20个3分钟K线前的价格
@@ -103,8 +106,13 @@ func Get(symbol string) (*Data, error) {
 		PriceChange1h:     priceChange1h,
 		PriceChange4h:     priceChange4h,
 		CurrentEMA20:      currentEMA20,
+		CurrentEMA50:      currentEMA50,
 		CurrentMACD:       currentMACD,
 		CurrentRSI7:       currentRSI7,
+		CurrentRSI14:      currentRSI14,
+		CurrentKDJK:       currentK,
+		CurrentKDJD:       currentD,
+		CurrentKDJJ:       currentJ,
 		OpenInterest:      oiData,
 		FundingRate:       fundingRate,
 		IntradaySeries:    intradayData,
@@ -190,6 +198,63 @@ func calculateRSI(klines []Kline, period int) float64 {
 	rsi := 100 - (100 / (1 + rs))
 
 	return rsi
+}
+
+// calculateKDJ 计算 KDJ 指标（9,3,3），返回最后一根 K 线的 K, D, J
+func calculateKDJ(klines []Kline) (k, d, j float64) {
+	const n, m1, m2 = 9, 3, 3
+	if len(klines) < n {
+		return 50, 50, 50
+	}
+	rsvs := make([]float64, len(klines))
+	for i := n - 1; i < len(klines); i++ {
+		high := klines[i].High
+		low := klines[i].Low
+		for jj := i - n + 1; jj <= i; jj++ {
+			if klines[jj].High > high {
+				high = klines[jj].High
+			}
+			if klines[jj].Low < low {
+				low = klines[jj].Low
+			}
+		}
+		if high == low {
+			rsvs[i] = 50
+		} else {
+			rsvs[i] = (klines[i].Close - low) / (high - low) * 100
+		}
+	}
+	// K = 2/3*K_prev + 1/3*RSV, D = 2/3*D_prev + 1/3*K, J = 3K - 2D
+	start := n - 1
+	kVal := rsvs[start]
+	dVal := kVal
+	for i := start + 1; i < len(rsvs); i++ {
+		kVal = (kVal*float64(m1-1) + rsvs[i]) / float64(m1)
+		dVal = (dVal*float64(m2-1) + kVal) / float64(m2)
+	}
+	jVal := 3*kVal - 2*dVal
+	return kVal, dVal, jVal
+}
+
+// calculateBOLL 计算布林带（20 周期，2 倍标准差），返回最后一根 K 线的 Upper, Mid, Lower
+func calculateBOLL(klines []Kline, period int, mult float64) (upper, mid, lower float64) {
+	if len(klines) < period {
+		return 0, 0, 0
+	}
+	slice := klines[len(klines)-period:]
+	sum := 0.0
+	for _, k := range slice {
+		sum += k.Close
+	}
+	mid = sum / float64(period)
+	variance := 0.0
+	for _, k := range slice {
+		variance += (k.Close - mid) * (k.Close - mid)
+	}
+	std := math.Sqrt(variance / float64(period))
+	upper = mid + mult*std
+	lower = mid - mult*std
+	return upper, mid, lower
 }
 
 // calculateATR 计算ATR
@@ -484,6 +549,71 @@ func Format(data *Data) string {
 	return sb.String()
 }
 
+// appendIndicatorStatsLine 根据选中的 indicators 拼接一行 min/max/avg 文本（Last10 或 Last6）
+func appendIndicatorStatsLine(sb *strings.Builder, s *IndicatorStats, indicators []string) {
+	all := len(indicators) == 0
+	parts := []string{}
+	parts = append(parts, fmt.Sprintf("price min/max/avg=%.4f/%.4f/%.4f", s.PriceMin, s.PriceMax, s.PriceAvg))
+	if all || indicatorInSet("ema", indicators) {
+		parts = append(parts, fmt.Sprintf("ema20=%.4f/%.4f/%.4f", s.EMA20Min, s.EMA20Max, s.EMA20Avg))
+	}
+	if all || indicatorInSet("macd", indicators) {
+		parts = append(parts, fmt.Sprintf("macd=%.4f/%.4f/%.4f", s.MACDMin, s.MACDMax, s.MACDAvg))
+	}
+	if all || indicatorInSet("rsi", indicators) {
+		parts = append(parts, fmt.Sprintf("rsi7=%.2f/%.2f/%.2f rsi14=%.2f/%.2f/%.2f", s.RSI7Min, s.RSI7Max, s.RSI7Avg, s.RSI14Min, s.RSI14Max, s.RSI14Avg))
+	}
+	if all || indicatorInSet("atr", indicators) {
+		parts = append(parts, fmt.Sprintf("atr14=%.4f/%.4f/%.4f", s.ATR14Min, s.ATR14Max, s.ATR14Avg))
+	}
+	if all || indicatorInSet("volume", indicators) {
+		parts = append(parts, fmt.Sprintf("volume=%.2f/%.2f/%.2f", s.VolumeMin, s.VolumeMax, s.VolumeAvg))
+	}
+	if all || indicatorInSet("bollinger", indicators) {
+		parts = append(parts, fmt.Sprintf("boll_u=%.4f/%.4f/%.4f boll_m=%.4f/%.4f/%.4f boll_l=%.4f/%.4f/%.4f",
+			s.BOLLUpperMin, s.BOLLUpperMax, s.BOLLUpperAvg, s.BOLLMidMin, s.BOLLMidMax, s.BOLLMidAvg,
+			s.BOLLLowerMin, s.BOLLLowerMax, s.BOLLLowerAvg))
+	}
+	if all || indicatorInSet("kdj", indicators) {
+		parts = append(parts, fmt.Sprintf("kdj_k=%.2f/%.2f/%.2f kdj_d=%.2f/%.2f/%.2f kdj_j=%.2f/%.2f/%.2f",
+			s.KDJKMin, s.KDJKMax, s.KDJKAvg, s.KDJDMin, s.KDJDMax, s.KDJDAvg, s.KDJJMin, s.KDJJMax, s.KDJJAvg))
+	}
+	sb.WriteString(strings.Join(parts, " "))
+}
+
+// FormatSummary 按币种输出「当前时刻」指标 + 各周期 10/6 根 K 线汇总（用于 User Prompt）
+// cfg 为 nil 或 Timeframes/Indicators 为空时输出全部周期、全部指标
+func FormatSummary(data *Data, cfg *AggregateConfig) string {
+	var sb strings.Builder
+	// 当前时刻（始终输出）
+	sb.WriteString(fmt.Sprintf("当前时刻: price=%s ema20=%.4f ema50=%.4f macd=%.4f rsi7=%.2f rsi14=%.2f KDJ_K=%.2f KDJ_D=%.2f KDJ_J=%.2f\n",
+		formatPriceWithDynamicPrecision(data.CurrentPrice), data.CurrentEMA20, data.CurrentEMA50, data.CurrentMACD,
+		data.CurrentRSI7, data.CurrentRSI14, data.CurrentKDJK, data.CurrentKDJD, data.CurrentKDJJ))
+	if data.OpenInterest != nil {
+		sb.WriteString(fmt.Sprintf("Open Interest: %s | Funding Rate: %.2e\n", formatPriceWithDynamicPrecision(data.OpenInterest.Latest), data.FundingRate))
+	}
+	order := defaultTimeframes
+	if cfg != nil && len(cfg.Timeframes) > 0 {
+		order = cfg.Timeframes
+	}
+	indicators := []string(nil)
+	if cfg != nil && len(cfg.Indicators) > 0 {
+		indicators = cfg.Indicators
+	}
+	for _, tf := range order {
+		agg, ok := data.TimeframeAggregates[tf]
+		if !ok || agg == nil {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("%s Timeframe: Last10[", tf))
+		appendIndicatorStatsLine(&sb, &agg.Last10, indicators)
+		sb.WriteString("] Last6[")
+		appendIndicatorStatsLine(&sb, &agg.Last6, indicators)
+		sb.WriteString("]\n")
+	}
+	return sb.String()
+}
+
 // formatPriceWithDynamicPrecision 根据价格区间动态选择精度
 // 这样可以完美支持从超低价 meme coin (< 0.0001) 到 BTC/ETH 的所有币种
 func formatPriceWithDynamicPrecision(price float64) string {
@@ -547,6 +677,218 @@ func parseFloat(v interface{}) (float64, error) {
 	default:
 		return 0, fmt.Errorf("unsupported type: %T", v)
 	}
+}
+
+// getKlinesForTimeframe 获取指定周期的 K 线：3m/4h 用 WebSocket 缓存，其余用 REST API
+func getKlinesForTimeframe(symbol string, timeframe string, limit int) ([]Kline, error) {
+	symbol = Normalize(symbol)
+	if timeframe == "3m" || timeframe == "4h" {
+		return WSMonitorCli.GetCurrentKlines(symbol, timeframe)
+	}
+	apiClient := NewAPIClient()
+	return apiClient.GetKlines(symbol, timeframe, limit)
+}
+
+// minMaxAvg 对 float64 切片计算最小值、最大值、平均值（忽略 NaN/0 的语义，仅做数值）
+func minMaxAvg(s []float64) (minV, maxV, avgV float64) {
+	if len(s) == 0 {
+		return 0, 0, 0
+	}
+	minV = s[0]
+	maxV = s[0]
+	sum := 0.0
+	for _, v := range s {
+		if v < minV {
+			minV = v
+		}
+		if v > maxV {
+			maxV = v
+		}
+		sum += v
+	}
+	return minV, maxV, sum / float64(len(s))
+}
+
+// defaultTimeframes 未配置时使用的周期列表（与前端可选一致）
+var defaultTimeframes = []string{"1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"}
+
+// validTimeframeSet Binance 支持的 K 线周期
+var validTimeframeSet = map[string]bool{
+	"1m": true, "3m": true, "5m": true, "15m": true, "30m": true,
+	"1h": true, "2h": true, "4h": true, "6h": true, "12h": true, "1d": true,
+}
+
+// ValidateTimeframe 校验周期是否支持
+func ValidateTimeframe(tf string) bool { return validTimeframeSet[tf] }
+
+// indicatorInSet 判断指标 id 是否在选中列表中；空列表表示全部选中
+func indicatorInSet(id string, list []string) bool {
+	if len(list) == 0 {
+		return true
+	}
+	for _, x := range list {
+		if x == id {
+			return true
+		}
+	}
+	return false
+}
+
+// computeIndicatorStatsForLastN 对 klines 最后 n 根 K 线计算各指标序列，再汇总为 min/max/avg
+// indicators 为空时计算全部；否则只计算列表中的指标：ema, macd, rsi, atr, volume, bollinger, kdj
+func computeIndicatorStatsForLastN(klines []Kline, n int, indicators []string) IndicatorStats {
+	var s IndicatorStats
+	if len(klines) < n {
+		n = len(klines)
+	}
+	if n == 0 {
+		return s
+	}
+	start := len(klines) - n
+
+	wantEMA := indicatorInSet("ema", indicators)
+	wantMACD := indicatorInSet("macd", indicators)
+	wantRSI := indicatorInSet("rsi", indicators)
+	wantATR := indicatorInSet("atr", indicators)
+	wantVolume := indicatorInSet("volume", indicators)
+	wantBOLL := indicatorInSet("bollinger", indicators)
+	wantKDJ := indicatorInSet("kdj", indicators)
+
+	prices := make([]float64, 0, n)
+	ema20s := make([]float64, 0, n)
+	macds := make([]float64, 0, n)
+	rsi7s := make([]float64, 0, n)
+	rsi14s := make([]float64, 0, n)
+	atr14s := make([]float64, 0, n)
+	vols := make([]float64, 0, n)
+	bollU := make([]float64, 0, n)
+	bollM := make([]float64, 0, n)
+	bollL := make([]float64, 0, n)
+	kdjKs := make([]float64, 0, n)
+	kdjDs := make([]float64, 0, n)
+	kdjJs := make([]float64, 0, n)
+
+	for i := start; i < len(klines); i++ {
+		sub := klines[:i+1]
+		prices = append(prices, klines[i].Close)
+		if wantVolume {
+			vols = append(vols, klines[i].Volume)
+		}
+		if wantEMA && len(sub) >= 20 {
+			ema20s = append(ema20s, calculateEMA(sub, 20))
+		}
+		if wantMACD && len(sub) >= 26 {
+			macds = append(macds, calculateMACD(sub))
+		}
+		if wantRSI {
+			if len(sub) >= 8 {
+				rsi7s = append(rsi7s, calculateRSI(sub, 7))
+			}
+			if len(sub) >= 15 {
+				rsi14s = append(rsi14s, calculateRSI(sub, 14))
+			}
+		}
+		if wantATR && len(sub) >= 15 {
+			atr14s = append(atr14s, calculateATR(sub, 14))
+		}
+		if wantBOLL && len(sub) >= 20 {
+			u, m, l := calculateBOLL(sub, 20, 2)
+			bollU = append(bollU, u)
+			bollM = append(bollM, m)
+			bollL = append(bollL, l)
+		}
+		if wantKDJ {
+			k, d, j := calculateKDJ(sub)
+			kdjKs = append(kdjKs, k)
+			kdjDs = append(kdjDs, d)
+			kdjJs = append(kdjJs, j)
+		}
+	}
+
+	s.PriceMin, s.PriceMax, s.PriceAvg = minMaxAvg(prices)
+	if wantVolume && len(vols) > 0 {
+		s.VolumeMin, s.VolumeMax, s.VolumeAvg = minMaxAvg(vols)
+	}
+	if wantEMA && len(ema20s) > 0 {
+		s.EMA20Min, s.EMA20Max, s.EMA20Avg = minMaxAvg(ema20s)
+	}
+	if wantMACD && len(macds) > 0 {
+		s.MACDMin, s.MACDMax, s.MACDAvg = minMaxAvg(macds)
+	}
+	if wantRSI {
+		if len(rsi7s) > 0 {
+			s.RSI7Min, s.RSI7Max, s.RSI7Avg = minMaxAvg(rsi7s)
+		}
+		if len(rsi14s) > 0 {
+			s.RSI14Min, s.RSI14Max, s.RSI14Avg = minMaxAvg(rsi14s)
+		}
+	}
+	if wantATR && len(atr14s) > 0 {
+		s.ATR14Min, s.ATR14Max, s.ATR14Avg = minMaxAvg(atr14s)
+	}
+	if wantBOLL && len(bollU) > 0 {
+		s.BOLLUpperMin, s.BOLLUpperMax, s.BOLLUpperAvg = minMaxAvg(bollU)
+		s.BOLLMidMin, s.BOLLMidMax, s.BOLLMidAvg = minMaxAvg(bollM)
+		s.BOLLLowerMin, s.BOLLLowerMax, s.BOLLLowerAvg = minMaxAvg(bollL)
+	}
+	if wantKDJ && len(kdjKs) > 0 {
+		s.KDJKMin, s.KDJKMax, s.KDJKAvg = minMaxAvg(kdjKs)
+		s.KDJDMin, s.KDJDMax, s.KDJDAvg = minMaxAvg(kdjDs)
+		s.KDJJMin, s.KDJJMax, s.KDJJAvg = minMaxAvg(kdjJs)
+	}
+	return s
+}
+
+// computeTimeframeAggregate 根据 klines 计算该周期的 10 根 / 6 根 K 线汇总；indicators 为空表示全部
+func computeTimeframeAggregate(klines []Kline, timeframe string, indicators []string) *TimeframeAggregate {
+	if len(klines) < 6 {
+		return nil
+	}
+	return &TimeframeAggregate{
+		Timeframe: timeframe,
+		Last10:    computeIndicatorStatsForLastN(klines, 10, indicators),
+		Last6:     computeIndicatorStatsForLastN(klines, 6, indicators),
+	}
+}
+
+// GetWithTimeframeAggregates 获取市场数据并填充各周期的 10/6 根 K 线汇总
+// cfg 为 nil 或 Timeframes/Indicators 为空时使用默认：全部周期、全部指标
+func GetWithTimeframeAggregates(symbol string, cfg *AggregateConfig) (*Data, error) {
+	data, err := Get(symbol)
+	if err != nil {
+		return nil, err
+	}
+	timeframes := defaultTimeframes
+	indicators := []string(nil)
+	if cfg != nil {
+		if len(cfg.Timeframes) > 0 {
+			timeframes = cfg.Timeframes
+		}
+		if len(cfg.Indicators) > 0 {
+			indicators = cfg.Indicators
+		}
+	}
+	const klineLimit = 50
+	data.TimeframeAggregates = make(map[string]*TimeframeAggregate)
+	for _, tf := range timeframes {
+		if !ValidateTimeframe(tf) {
+			continue
+		}
+		limit := klineLimit
+		if cfg != nil && cfg.DataPoints != nil && cfg.DataPoints[tf] > 0 {
+			if cfg.DataPoints[tf] > limit {
+				limit = cfg.DataPoints[tf]
+			}
+		}
+		klines, err := getKlinesForTimeframe(symbol, tf, limit)
+		if err != nil || len(klines) < 6 {
+			continue
+		}
+		if agg := computeTimeframeAggregate(klines, tf, indicators); agg != nil {
+			data.TimeframeAggregates[tf] = agg
+		}
+	}
+	return data, nil
 }
 
 // isStaleData detects stale data (consecutive price freeze)
