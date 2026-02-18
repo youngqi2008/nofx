@@ -1000,9 +1000,10 @@ func Format(data *Data) string {
 
 // formatTimeframeData formats data for a single timeframe
 func formatTimeframeData(sb *strings.Builder, data *TimeframeSeriesData) {
-	// Use OHLCV table format if kline data is available
+	// Use OHLC table format if kline data is available, Volume shown separately
 	if len(data.Klines) > 0 {
-		sb.WriteString("Time(UTC)      Open      High      Low       Close     Volume\n")
+		sb.WriteString("Time(UTC)      Open      High      Low       Close\n")
+		volumes := make([]float64, len(data.Klines))
 		for i, k := range data.Klines {
 			t := time.Unix(k.Time/1000, 0).UTC()
 			timeStr := t.Format("01-02 15:04")
@@ -1010,10 +1011,11 @@ func formatTimeframeData(sb *strings.Builder, data *TimeframeSeriesData) {
 			if i == len(data.Klines)-1 {
 				marker = "  <- current"
 			}
-			sb.WriteString(fmt.Sprintf("%-14s %-9.4f %-9.4f %-9.4f %-9.4f %-12.2f%s\n",
-				timeStr, k.Open, k.High, k.Low, k.Close, k.Volume, marker))
+			sb.WriteString(fmt.Sprintf("%-14s %-9.4f %-9.4f %-9.4f %-9.4f%s\n",
+				timeStr, k.Open, k.High, k.Low, k.Close, marker))
+			volumes[i] = k.Volume
 		}
-		sb.WriteString("\n")
+		sb.WriteString(fmt.Sprintf("Volume:%s\n\n", formatVolumeSlice(volumes)))
 	} else if len(data.MidPrices) > 0 {
 		// Fallback to old format for backward compatibility
 		sb.WriteString(fmt.Sprintf("Mid prices: %s\n\n", formatFloatSlice(data.MidPrices)))
@@ -1079,6 +1081,15 @@ func formatPriceWithDynamicPrecision(price float64) string {
 		// 45678.9123 → "45678.91" (2 decimal places)
 		return fmt.Sprintf("%.2f", price)
 	}
+}
+
+// formatVolumeSlice formats volume values with 2 decimal places: [10.80, 22.13, ...]
+func formatVolumeSlice(values []float64) string {
+	strValues := make([]string, len(values))
+	for i, v := range values {
+		strValues[i] = fmt.Sprintf("%.2f", v)
+	}
+	return "[" + strings.Join(strValues, ", ") + "]"
 }
 
 // formatFloatSlice formats float64 slice to string (using dynamic precision)
@@ -1294,3 +1305,4 @@ func ExportCalculateBOLL(klines []Kline, period int, multiplier float64) (upper,
 func ExportCalculateKDJ(klines []Kline, n, m1, m2 int) (k, d, j float64) {
 	return calculateKDJ(klines, n, m1, m2)
 }
+

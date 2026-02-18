@@ -876,8 +876,8 @@ func (e *StrategyEngine) FetchPriceRankingData() *nofxos.PriceRankingData {
 // BuildSystemPrompt builds System Prompt according to strategy configuration
 func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string) string {
 	var sb strings.Builder
-	//riskControl := e.config.RiskControl
-	//promptSections := e.config.PromptSections
+//	riskControl := e.config.RiskControl
+//	promptSections := e.config.PromptSections
 
 	// 0. Data Dictionary & Schema (ensure AI understands all fields)
 	lang := e.GetLanguage()
@@ -1000,7 +1000,7 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	sb.WriteString(fmt.Sprintf("- `confidence`: 0-100 (opening recommended ≥ %d)\n", riskControl.MinConfidence))
 	sb.WriteString("- Required when opening: leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd\n")
 	sb.WriteString("- **IMPORTANT**: All numeric values must be calculated numbers, NOT formulas/expressions (e.g., use `27.76` not `3000 * 0.01`)\n\n")
-*/
+	*/
 	// 8. Custom Prompt
 	if e.config.CustomPrompt != "" {
 		sb.WriteString("# 📌 Personalized Trading Strategy\n\n")
@@ -1686,7 +1686,8 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 
 func (e *StrategyEngine) formatTimeframeSeriesData(sb *strings.Builder, data *market.TimeframeSeriesData, indicators store.IndicatorConfig) {
 	if len(data.Klines) > 0 {
-		sb.WriteString("Time(UTC)      Open      High      Low       Close     Volume\n")
+		sb.WriteString("Time(UTC)      Open      High      Low       Close\n")
+		volumes := make([]float64, len(data.Klines))
 		for i, k := range data.Klines {
 			t := time.Unix(k.Time/1000, 0).UTC()
 			timeStr := t.Format("01-02 15:04")
@@ -1694,10 +1695,11 @@ func (e *StrategyEngine) formatTimeframeSeriesData(sb *strings.Builder, data *ma
 			if i == len(data.Klines)-1 {
 				marker = "  <- current"
 			}
-			sb.WriteString(fmt.Sprintf("%-14s %-9.4f %-9.4f %-9.4f %-9.4f %-12.2f%s\n",
-				timeStr, k.Open, k.High, k.Low, k.Close, k.Volume, marker))
+			sb.WriteString(fmt.Sprintf("%-14s %-9.4f %-9.4f %-9.4f %-9.4f%s\n",
+				timeStr, k.Open, k.High, k.Low, k.Close, marker))
+			volumes[i] = k.Volume
 		}
-		sb.WriteString("\n")
+		sb.WriteString(fmt.Sprintf("Volume:%s\n\n", formatVolumeSlice(volumes)))
 	} else if len(data.MidPrices) > 0 {
 		sb.WriteString(fmt.Sprintf("Mid prices: %s\n\n", formatFloatSlice(data.MidPrices)))
 		if indicators.EnableVolume && len(data.Volume) > 0 {
@@ -1854,6 +1856,14 @@ func formatFlowValue(v float64) string {
 		return fmt.Sprintf("%s%.2fK", sign, v/1e3)
 	}
 	return fmt.Sprintf("%s%.2f", sign, v)
+}
+
+func formatVolumeSlice(values []float64) string {
+	strValues := make([]string, len(values))
+	for i, v := range values {
+		strValues[i] = fmt.Sprintf("%.2f", v)
+	}
+	return "[" + strings.Join(strValues, ", ") + "]"
 }
 
 func formatFloatSlice(values []float64) string {
