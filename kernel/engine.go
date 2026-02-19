@@ -876,8 +876,8 @@ func (e *StrategyEngine) FetchPriceRankingData() *nofxos.PriceRankingData {
 // BuildSystemPrompt builds System Prompt according to strategy configuration
 func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string) string {
 	var sb strings.Builder
-//	riskControl := e.config.RiskControl
-//	promptSections := e.config.PromptSections
+	//riskControl := e.config.RiskControl
+	//promptSections := e.config.PromptSections
 
 	// 0. Data Dictionary & Schema (ensure AI understands all fields)
 	lang := e.GetLanguage()
@@ -1698,6 +1698,10 @@ func (e *StrategyEngine) formatTimeframeSeriesData(sb *strings.Builder, data *ma
 			sb.WriteString(fmt.Sprintf("%-14s %-9.4f %-9.4f %-9.4f %-9.4f%s\n",
 				timeStr, k.Open, k.High, k.Low, k.Close, marker))
 			volumes[i] = k.Volume
+		}
+		// Replace the latest Volume (incomplete K-line) with the second latest Volume value
+		if len(volumes) >= 2 {
+			volumes[len(volumes)-1] = volumes[len(volumes)-2]
 		}
 		sb.WriteString(fmt.Sprintf("Volume:%s\n\n", formatVolumeSlice(volumes)))
 	} else if len(data.MidPrices) > 0 {

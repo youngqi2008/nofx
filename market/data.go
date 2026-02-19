@@ -1015,6 +1015,10 @@ func formatTimeframeData(sb *strings.Builder, data *TimeframeSeriesData) {
 				timeStr, k.Open, k.High, k.Low, k.Close, marker))
 			volumes[i] = k.Volume
 		}
+		// Replace the latest Volume (incomplete K-line) with the second latest Volume value
+		if len(volumes) >= 2 {
+			volumes[len(volumes)-1] = volumes[len(volumes)-2]
+		}
 		sb.WriteString(fmt.Sprintf("Volume:%s\n\n", formatVolumeSlice(volumes)))
 	} else if len(data.MidPrices) > 0 {
 		// Fallback to old format for backward compatibility
