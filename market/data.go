@@ -519,6 +519,12 @@ func buildBarStatsPeriod(d *TimeframeSeriesData, n int, prices []float64) *BarSt
 	s.KMax, s.KMin, s.KAvg = maxMinAvgSlice(d.KValues, n)
 	s.DMax, s.DMin, s.DAvg = maxMinAvgSlice(d.DValues, n)
 	s.JMax, s.JMin, s.JAvg = maxMinAvgSlice(d.JValues, n)
+	// Volume from Klines
+	volumes := make([]float64, 0, len(d.Klines))
+	for _, k := range d.Klines {
+		volumes = append(volumes, k.Volume)
+	}
+	s.VolumeMax, s.VolumeMin, s.VolumeAvg = maxMinAvgSlice(volumes, n)
 	return s
 }
 

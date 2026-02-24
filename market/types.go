@@ -38,6 +38,7 @@ type BarStatsPeriod struct {
 	KMax, KMin, KAvg                             float64
 	DMax, DMin, DAvg                             float64
 	JMax, JMin, JAvg                             float64
+	VolumeMax, VolumeMin, VolumeAvg             float64 // Volume over last N bars
 }
 
 // KlineBar single kline bar with OHLCV data

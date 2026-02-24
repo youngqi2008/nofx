@@ -1769,6 +1769,9 @@ func (e *StrategyEngine) writeBarStatsLine(sb *strings.Builder, s *market.BarSta
 		sb.WriteString(fmt.Sprintf("  KDJ k: %.3f / %.3f / %.3f, d: %.3f / %.3f / %.3f, j: %.3f / %.3f / %.3f\n",
 			s.KMax, s.KMin, s.KAvg, s.DMax, s.DMin, s.DAvg, s.JMax, s.JMin, s.JAvg))
 	}
+	if indicators.EnableVolume {
+		sb.WriteString(fmt.Sprintf("  volume: %.3f / %.3f / %.3f\n", s.VolumeMax, s.VolumeMin, s.VolumeAvg))
+	}
 }
 
 func (e *StrategyEngine) formatTimeframeSeriesData(sb *strings.Builder, data *market.TimeframeSeriesData, indicators store.IndicatorConfig) {

@@ -90,8 +90,8 @@ BTC: 97234.56 (1h: +1.23%, 4h: -0.45%) | MACD: 0.1234 | RSI: 58.00
 每个 **`=== XM Timeframe (oldest → latest) ===`** 块内，会先输出该周期的**当前时刻**与**最近 10 根、6 根 K 线的 max/min/avg**（受策略指标开关控制）：
 
 - **`**Current (this TF):**`**：本周期最后一根的价格、ema20、ema50、macd、rsi7、rsi14、ATR14、BOLL Upper/Middle/Lower、k/d/j。
-- **`**Last 10 bars (max / min / avg):**`**：最近 10 根 K 线对应的 price、ema20、ema50、macd、rsi7、rsi14、BOLL、KDJ 的 最大值 / 最小值 / 平均值。
-- **`**Last 6 bars (max / min / avg):**`**：最近 6 根 K 线同上。
+- **`**Last 10 bars (max / min / avg):**`**：最近 10 根 K 线对应的 price、ema20、ema50、macd、rsi7、rsi14、BOLL、KDJ、volume 的 最大值 / 最小值 / 平均值（volume 受 `EnableVolume` 控制）。
+- **`**Last 6 bars (max / min / avg):**`**：最近 6 根 K 线同上（含 volume 统计）。
 
 在提示词中搜索 **`Last 10 bars`** 或 **`Last 6 bars`** 可定位到这些汇总。
 
