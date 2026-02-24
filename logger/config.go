@@ -11,3 +11,10 @@ func (c *Config) SetDefaults() {
 		c.Level = "info"
 	}
 }
+
+// TelegramConfig is the configuration for Telegram log hook (used by telegram_hook.go).
+type TelegramConfig struct {
+	Enabled  bool   `json:"enabled"`
+	BotToken string `json:"bot_token"`
+	ChatID   string `json:"chat_id"`
+}
