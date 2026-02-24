@@ -1,4 +1,31 @@
 services:
+  # Nginx reverse proxy (HTTPS/HTTP)
+  nginx-proxy:
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile.nginx-proxy
+    container_name: nofx-nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      # Mount SSL certificates (use your own certificates or self-signed)
+      - ./ssl:/etc/nginx/ssl:ro
+      # For Let's Encrypt ACME challenge (optional)
+      - ./certbot/www:/var/www/certbot:ro
+    networks:
+      - nofx-network
+    depends_on:
+      - nofx
+      - nofx-frontend
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
   # Backend service (API and core logic)
   nofx:
     build:
@@ -9,19 +36,15 @@ services:
     stop_grace_period: 30s  # 允许应用有 30 秒时间优雅关闭
     ports:
       - "${NOFX_BACKEND_PORT:-8080}:8080"
+      - "6060:6060"  # pprof profiling
     volumes:
-      - ./config.json:/app/config.json:ro
-      - ./config.db:/app/config.db
-      - ./beta_codes.txt:/app/beta_codes.txt:ro
-      - ./decision_logs:/app/decision_logs
-      - ./prompts:/app/prompts
-      - ./secrets:/app/secrets:ro  # RSA密钥文件
-      - /etc/localtime:/etc/localtime:ro  # Sync host time
+      - ./data:/app/data
+      - /etc/localtime:/etc/localtime:ro
+    env_file:
+      - .env
     environment:
-      - TZ=${NOFX_TIMEZONE:-Asia/Shanghai}  # Set timezone
-      - AI_MAX_TOKENS=4000  # AI响应的最大token数（默认2000，建议4000-8000）
-      - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY}  # 数据库加密密钥
-      - JWT_SECRET=${JWT_SECRET}  # JWT认证密钥
+      - TZ=${TZ:-Asia/Shanghai}
+      - AI_MAX_TOKENS=8000
     networks:
       - nofx-network
     healthcheck:

@@ -1,0 +1,41 @@
+# docker/Dockerfile.nginx-proxy
+#
+# ═══════════════════════════════════════════════════════════════
+# NOFX Nginx Reverse Proxy Dockerfile
+# Supports HTTPS (443) with SSL certificate mounting
+# ═══════════════════════════════════════════════════════════════
+
+ARG NGINX_VERSION=alpine
+
+FROM nginx:${NGINX_VERSION}
+
+# Install openssl for certificate generation (optional, for self-signed certs)
+RUN apk add --no-cache openssl
+
+# Create SSL certificate directory
+RUN mkdir -p /etc/nginx/ssl /var/www/certbot
+
+# Copy nginx configuration
+COPY nginx/nginx-ssl.conf /etc/nginx/conf.d/default.conf
+
+# Create a script to generate self-signed certificate (for development)
+RUN echo '#!/bin/sh' > /generate-self-signed-cert.sh && \
+    echo 'if [ ! -f /etc/nginx/ssl/cert.pem ] || [ ! -f /etc/nginx/ssl/key.pem ]; then' >> /generate-self-signed-cert.sh && \
+    echo '  echo "Generating self-signed certificate..."' >> /generate-self-signed-cert.sh && \
+    echo '  openssl req -x509 -nodes -days 365 -newkey rsa:2048 \' >> /generate-self-signed-cert.sh && \
+    echo '    -keyout /etc/nginx/ssl/key.pem \' >> /generate-self-signed-cert.sh && \
+    echo '    -out /etc/nginx/ssl/cert.pem \' >> /generate-self-signed-cert.sh && \
+    echo '    -subj "/C=US/ST=State/L=City/O=Organization/CN=localhost"' >> /generate-self-signed-cert.sh && \
+    echo '  echo "Self-signed certificate generated"' >> /generate-self-signed-cert.sh && \
+    echo 'fi' >> /generate-self-signed-cert.sh && \
+    chmod +x /generate-self-signed-cert.sh
+
+# Expose ports
+EXPOSE 80 443
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost/health || exit 1
+
+# Generate self-signed cert if not provided, then start nginx
+CMD ["/bin/sh", "-c", "/generate-self-signed-cert.sh && nginx -g 'daemon off;'"]

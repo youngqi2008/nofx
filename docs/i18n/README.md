@@ -173,7 +173,7 @@ faq.zh-CN.md                 → Chinese FAQ
 **Want to join the team? / 想加入团队？**
 - Contact on [Telegram](https://t.me/nofx_dev_community)
 - Open an issue on GitHub
-- DM [@nofx_ai](https://x.com/nofx_ai) on Twitter
+- DM [@nofx_official](https://x.com/nofx_official) on Twitter
 
 ---
 
@@ -219,7 +219,7 @@ faq.zh-CN.md                 → Chinese FAQ
 
 **Questions? / 有问题？**
 - 💬 Ask in [Telegram Community](https://t.me/nofx_dev_community)
-- 🐙 Open a [GitHub Issue](https://github.com/tinkle-community/nofx/issues)
+- 🐙 Open a [GitHub Issue](https://github.com/NoFxAiOS/nofx/issues)
 - 📧 Contact maintainers
 
 **Resources / 资源:**

@@ -2,84 +2,79 @@ package market
 
 import "time"
 
-// Data 市场数据结构
+// Data market data structure
 type Data struct {
 	Symbol            string
 	CurrentPrice      float64
-	PriceChange1h     float64 // 1小时价格变化百分比
-	PriceChange4h     float64 // 4小时价格变化百分比
+	PriceChange1h     float64 // 1-hour price change percentage
+	PriceChange4h     float64 // 4-hour price change percentage
 	CurrentEMA20      float64
-	CurrentEMA50      float64
 	CurrentMACD       float64
 	CurrentRSI7       float64
-	CurrentRSI14      float64
-	CurrentKDJK      float64
-	CurrentKDJD      float64
-	CurrentKDJJ      float64
+	CurrentK          float64 // KDJ K value
+	CurrentD          float64 // KDJ D value
+	CurrentJ          float64 // KDJ J value
 	OpenInterest      *OIData
 	FundingRate       float64
 	IntradaySeries    *IntradayData
 	LongerTermContext *LongerTermData
-	// TimeframeAggregates 各周期最近10根/6根K线的指标汇总（min/max/avg），用于 User Prompt 汇总展示
-	TimeframeAggregates map[string]*TimeframeAggregate
-	TradeHistory        []map[string]interface{} `json:"-"` // 可选：该币种历史成交，由 decision 层注入
+	// Multi-timeframe data (new)
+	TimeframeData map[string]*TimeframeSeriesData `json:"timeframe_data,omitempty"`
 }
 
-// TimeframeAggregate 某周期下最近 N 根 K 线的指标汇总（最小值、最大值、平均值）
-type TimeframeAggregate struct {
-	Timeframe string
-	// Last10 最近 10 根 K 线
-	Last10 IndicatorStats
-	// Last6 最近 6 根 K 线
-	Last6 IndicatorStats
+// KlineBar single kline bar with OHLCV data
+type KlineBar struct {
+	Time   int64   `json:"time"`   // Unix timestamp in milliseconds
+	Open   float64 `json:"open"`   // Open price
+	High   float64 `json:"high"`   // High price
+	Low    float64 `json:"low"`    // Low price
+	Close  float64 `json:"close"`  // Close price
+	Volume float64 `json:"volume"` // Volume
 }
 
-// IndicatorStats 单组 K 线内的指标统计
-type IndicatorStats struct {
-	PriceMin, PriceMax, PriceAvg       float64
-	EMA20Min, EMA20Max, EMA20Avg      float64
-	MACDMin, MACDMax, MACDAvg        float64
-	RSI7Min, RSI7Max, RSI7Avg         float64
-	RSI14Min, RSI14Max, RSI14Avg      float64
-	ATR14Min, ATR14Max, ATR14Avg     float64
-	BOLLUpperMin, BOLLUpperMax, BOLLUpperAvg float64
-	BOLLMidMin, BOLLMidMax, BOLLMidAvg       float64
-	BOLLLowerMin, BOLLLowerMax, BOLLLowerAvg float64
-	KDJKMin, KDJKMax, KDJKAvg         float64
-	KDJDMin, KDJDMax, KDJDAvg         float64
-	KDJJMin, KDJJMax, KDJJAvg         float64
-	VolumeMin, VolumeMax, VolumeAvg   float64
+// TimeframeSeriesData series data for a single timeframe
+type TimeframeSeriesData struct {
+	Timeframe   string     `json:"timeframe"`    // Timeframe identifier, e.g. "5m", "15m", "1h"
+	Klines      []KlineBar `json:"klines"`       // Full OHLCV kline data
+	MidPrices   []float64  `json:"mid_prices"`   // Price series (deprecated, kept for compatibility)
+	EMA20Values []float64  `json:"ema20_values"` // EMA20 series
+	EMA50Values []float64  `json:"ema50_values"` // EMA50 series
+	MACDValues  []float64  `json:"macd_values"`  // MACD series
+	RSI7Values  []float64  `json:"rsi7_values"`  // RSI7 series
+	RSI14Values []float64  `json:"rsi14_values"` // RSI14 series
+	Volume      []float64  `json:"volume"`       // Volume series (deprecated, use Klines)
+	ATR14       float64    `json:"atr14"`        // ATR14
+	// Bollinger Bands (period 20, std dev multiplier 2)
+	BOLLUpper  []float64 `json:"boll_upper"`  // Upper band
+	BOLLMiddle []float64 `json:"boll_middle"` // Middle band (SMA)
+	BOLLLower  []float64 `json:"boll_lower"`  // Lower band
+	// KDJ (default 9,3,3)
+	KValues []float64 `json:"k_values"` // K line
+	DValues []float64 `json:"d_values"` // D line
+	JValues []float64 `json:"j_values"` // J line
 }
 
-// AggregateConfig 汇总配置：前端选中的时间序列与市场指标，仅计算并输出这些
-// 与前端 IndicatorConfigPanel 的 indicators / timeframes 对应
-type AggregateConfig struct {
-	// Timeframes 选中的周期，如 ["1m","3m","5m","15m","30m","1h","4h","1d"]，空则使用默认全部
-	Timeframes []string `json:"timeframes"`
-	// Indicators 选中的指标 id：ema, macd, rsi, atr, volume, bollinger, kdj；空则使用默认全部
-	Indicators []string `json:"indicators"`
-	// DataPoints 各周期 K 线数量（可选），用于拉取足够长度
-	DataPoints map[string]int `json:"data_points,omitempty"`
-}
-
-// OIData Open Interest数据
+// OIData Open Interest data
 type OIData struct {
 	Latest  float64
 	Average float64
 }
 
-// IntradayData 日内数据(3分钟间隔)
+// IntradayData intraday data (3-minute interval)
 type IntradayData struct {
 	MidPrices   []float64
 	EMA20Values []float64
 	MACDValues  []float64
 	RSI7Values  []float64
 	RSI14Values []float64
+	KValues     []float64 // KDJ K
+	DValues     []float64 // KDJ D
+	JValues     []float64 // KDJ J
 	Volume      []float64
 	ATR14       float64
 }
 
-// LongerTermData 长期数据(4小时时间框架)
+// LongerTermData longer-term data (4-hour timeframe)
 type LongerTermData struct {
 	EMA20         float64
 	EMA50         float64
@@ -89,9 +84,12 @@ type LongerTermData struct {
 	AverageVolume float64
 	MACDValues    []float64
 	RSI14Values   []float64
+	KValues       []float64 // KDJ K
+	DValues       []float64 // KDJ D
+	JValues       []float64 // KDJ J
 }
 
-// Binance API 响应结构
+// Binance API response structure
 type ExchangeInfo struct {
 	Symbols []SymbolInfo `json:"symbols"`
 }
@@ -135,7 +133,7 @@ type Ticker24hr struct {
 	QuoteVolume        string `json:"quoteVolume"`
 }
 
-// 特征数据结构
+// SymbolFeatures feature data structure
 type SymbolFeatures struct {
 	Symbol           string    `json:"symbol"`
 	Timestamp        time.Time `json:"timestamp"`
@@ -156,7 +154,7 @@ type SymbolFeatures struct {
 	PositionInRange  float64   `json:"position_in_range"`
 }
 
-// 警报数据结构
+// Alert alert data structure
 type Alert struct {
 	Type      string    `json:"type"`
 	Symbol    string    `json:"symbol"`
@@ -180,10 +178,10 @@ type AlertThresholds struct {
 	RSIOversold      float64 `json:"rsi_oversold"`
 }
 type CleanupConfig struct {
-	InactiveTimeout   time.Duration `json:"inactive_timeout"`    // 不活跃超时时间
-	MinScoreThreshold float64       `json:"min_score_threshold"` // 最低评分阈值
-	NoAlertTimeout    time.Duration `json:"no_alert_timeout"`    // 无警报超时时间
-	CheckInterval     time.Duration `json:"check_interval"`      // 检查间隔
+	InactiveTimeout   time.Duration `json:"inactive_timeout"`    // Inactive timeout duration
+	MinScoreThreshold float64       `json:"min_score_threshold"` // Minimum score threshold
+	NoAlertTimeout    time.Duration `json:"no_alert_timeout"`    // No alert timeout duration
+	CheckInterval     time.Duration `json:"check_interval"`      // Check interval
 }
 
 var config = Config{

@@ -28,65 +28,77 @@ var (
 		"connection refused",
 		"temporary failure",
 		"no such host",
-		"stream error",   // HTTP/2 stream 错误
-		"INTERNAL_ERROR", // 服务端内部错误
+		"stream error",   // HTTP/2 stream error
+		"INTERNAL_ERROR", // Server internal error
 	}
+
+	// TokenUsageCallback is called after each AI request with token usage info
+	TokenUsageCallback func(usage TokenUsage)
 )
 
-// Client AI API配置
+// TokenUsage represents token usage from AI API response
+type TokenUsage struct {
+	Provider         string
+	Model            string
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+}
+
+// Client AI API configuration
 type Client struct {
 	Provider   string
 	APIKey     string
 	BaseURL    string
 	Model      string
-	UseFullURL bool // 是否使用完整URL（不添加/chat/completions）
-	MaxTokens  int  // AI响应的最大token数
+	UseFullURL bool // Whether to use full URL (without appending /chat/completions)
+	MaxTokens  int  // Maximum tokens for AI response
 
 	httpClient *http.Client
-	logger     Logger // 日志器（可替换）
-	config     *Config // 配置对象（保存所有配置）
+	logger     Logger // Logger (replaceable)
+	config     *Config // Config object (stores all configurations)
 
-	// hooks 用于实现动态分派（多态）
-	// 当 DeepSeekClient 嵌入 Client 时，hooks 指向 DeepSeekClient
-	// 这样 call() 中调用的方法会自动分派到子类重写的版本
+	// hooks are used to implement dynamic dispatch (polymorphism)
+	// When DeepSeekClient embeds Client, hooks point to DeepSeekClient
+	// This way methods called in call() are automatically dispatched to the overridden version in subclass
 	hooks clientHooks
 }
 
-// New 创建默认客户端（向前兼容）
+// New creates default client (backward compatible)
 //
-// Deprecated: 推荐使用 NewClient(...opts) 以获得更好的灵活性
+// Deprecated: Recommend using NewClient(...opts) for better flexibility
 func New() AIClient {
 	return NewClient()
 }
 
-// NewClient 创建客户端（支持选项模式）
+// NewClient creates client (supports options pattern)
 //
-// 使用示例：
-//   // 基础用法（向前兼容）
+// Usage examples:
+//   // Basic usage (backward compatible)
 //   client := mcp.NewClient()
 //
-//   // 自定义日志
+//   // Custom logger
 //   client := mcp.NewClient(mcp.WithLogger(customLogger))
 //
-//   // 自定义超时
+//   // Custom timeout
 //   client := mcp.NewClient(mcp.WithTimeout(60*time.Second))
 //
-//   // 组合多个选项
+//   // Combine multiple options
 //   client := mcp.NewClient(
 //       mcp.WithDeepSeekConfig("sk-xxx"),
 //       mcp.WithLogger(customLogger),
 //       mcp.WithTimeout(60*time.Second),
 //   )
 func NewClient(opts ...ClientOption) AIClient {
-	// 1. 创建默认配置
+	// 1. Create default config
 	cfg := DefaultConfig()
 
-	// 2. 应用用户选项
+	// 2. Apply user options
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
-	// 3. 创建客户端实例
+	// 3. Create client instance
 	client := &Client{
 		Provider:   cfg.Provider,
 		APIKey:     cfg.APIKey,
@@ -99,25 +111,25 @@ func NewClient(opts ...ClientOption) AIClient {
 		config:     cfg,
 	}
 
-	// 4. 设置默认 Provider（如果未设置）
+	// 4. Set default Provider (if not set)
 	if client.Provider == "" {
 		client.Provider = ProviderDeepSeek
 		client.BaseURL = DefaultDeepSeekBaseURL
 		client.Model = DefaultDeepSeekModel
 	}
 
-	// 5. 设置 hooks 指向自己
+	// 5. Set hooks to point to self
 	client.hooks = client
 
 	return client
 }
 
-// SetCustomAPI 设置自定义OpenAI兼容API
+// SetCustomAPI sets custom OpenAI-compatible API
 func (client *Client) SetAPIKey(apiKey, apiURL, customModel string) {
 	client.Provider = ProviderCustom
 	client.APIKey = apiKey
 
-	// 检查URL是否以#结尾，如果是则使用完整URL（不添加/chat/completions）
+	// Check if URL ends with #, if so use full URL (without appending /chat/completions)
 	if strings.HasSuffix(apiURL, "#") {
 		client.BaseURL = strings.TrimSuffix(apiURL, "#")
 		client.UseFullURL = true
@@ -133,45 +145,45 @@ func (client *Client) SetTimeout(timeout time.Duration) {
 	client.httpClient.Timeout = timeout
 }
 
-// CallWithMessages 模板方法 - 固定的重试流程（不可重写）
+// CallWithMessages template method - fixed retry flow (cannot be overridden)
 func (client *Client) CallWithMessages(systemPrompt, userPrompt string) (string, error) {
 	if client.APIKey == "" {
-		return "", fmt.Errorf("AI API密钥未设置，请先调用 SetAPIKey")
+		return "", fmt.Errorf("AI API key not set, please call SetAPIKey first")
 	}
 
-	// 固定的重试流程
+	// Fixed retry flow
 	var lastErr error
 	maxRetries := client.config.MaxRetries
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if attempt > 1 {
-			client.logger.Warnf("⚠️  AI API调用失败，正在重试 (%d/%d)...", attempt, maxRetries)
+			client.logger.Warnf("⚠️  AI API call failed, retrying (%d/%d)...", attempt, maxRetries)
 		}
 
-		// 调用固定的单次调用流程
+		// Call the fixed single-call flow
 		result, err := client.hooks.call(systemPrompt, userPrompt)
 		if err == nil {
 			if attempt > 1 {
-				client.logger.Infof("✓ AI API重试成功")
+				client.logger.Infof("✓ AI API retry succeeded")
 			}
 			return result, nil
 		}
 
 		lastErr = err
-		// 通过 hooks 判断是否可重试（支持子类自定义重试策略）
+		// Check if error is retryable via hooks (supports custom retry strategy in subclass)
 		if !client.hooks.isRetryableError(err) {
 			return "", err
 		}
 
-		// 重试前等待
+		// Wait before retry
 		if attempt < maxRetries {
 			waitTime := client.config.RetryWaitBase * time.Duration(attempt)
-			client.logger.Infof("⏳ 等待%v后重试...", waitTime)
+			client.logger.Infof("⏳ Waiting %v before retry...", waitTime)
 			time.Sleep(waitTime)
 		}
 	}
 
-	return "", fmt.Errorf("重试%d次后仍然失败: %w", maxRetries, lastErr)
+	return "", fmt.Errorf("still failed after %d retries: %w", maxRetries, lastErr)
 }
 
 func (client *Client) setAuthHeader(reqHeader http.Header) {
@@ -179,28 +191,33 @@ func (client *Client) setAuthHeader(reqHeader http.Header) {
 }
 
 func (client *Client) buildMCPRequestBody(systemPrompt, userPrompt string) map[string]any {
-	// 构建 messages 数组
+	// Build messages array
 	messages := []map[string]string{}
 
-	// 如果有 system prompt，添加 system message
+	// If system prompt exists, add system message
 	if systemPrompt != "" {
 		messages = append(messages, map[string]string{
 			"role":    "system",
 			"content": systemPrompt,
 		})
 	}
-	// 添加 user message
+	// Add user message
 	messages = append(messages, map[string]string{
 		"role":    "user",
 		"content": userPrompt,
 	})
 
-	// 构建请求体
+	// Build request body
 	requestBody := map[string]interface{}{
 		"model":       client.Model,
 		"messages":    messages,
-		"temperature": client.config.Temperature, // 使用配置的 temperature
-		"max_tokens":  client.MaxTokens,
+		"temperature": client.config.Temperature, // Use configured temperature
+	}
+	// OpenAI newer models use max_completion_tokens instead of max_tokens
+	if client.Provider == ProviderOpenAI {
+		requestBody["max_completion_tokens"] = client.MaxTokens
+	} else {
+		requestBody["max_tokens"] = client.MaxTokens
 	}
 	return requestBody
 }
@@ -209,7 +226,7 @@ func (client *Client) buildMCPRequestBody(systemPrompt, userPrompt string) map[s
 func (client *Client) marshalRequestBody(requestBody map[string]any) ([]byte, error) {
 	jsonData, err := json.Marshal(requestBody)
 	if err != nil {
-		return nil, fmt.Errorf("序列化请求失败: %w", err)
+		return nil, fmt.Errorf("failed to serialize request: %w", err)
 	}
 	return jsonData, nil
 }
@@ -221,14 +238,30 @@ func (client *Client) parseMCPResponse(body []byte) (string, error) {
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
 	}
 
 	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("解析响应失败: %w", err)
+		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("API返回空响应")
+		return "", fmt.Errorf("API returned empty response")
+	}
+
+	// Report token usage if callback is set
+	if TokenUsageCallback != nil && result.Usage.TotalTokens > 0 {
+		TokenUsageCallback(TokenUsage{
+			Provider:         client.Provider,
+			Model:            client.Model,
+			PromptTokens:     result.Usage.PromptTokens,
+			CompletionTokens: result.Usage.CompletionTokens,
+			TotalTokens:      result.Usage.TotalTokens,
+		})
 	}
 
 	return result.Choices[0].Message.Content, nil
@@ -250,59 +283,59 @@ func (client *Client) buildRequest(url string, jsonData []byte) (*http.Request, 
 
 	req.Header.Set("Content-Type", "application/json")
 
-	// 通过 hooks 设置认证头（支持子类重写）
+	// Set auth header via hooks (supports overriding in subclass)
 	client.hooks.setAuthHeader(req.Header)
 
 	return req, nil
 }
 
-// call 单次调用AI API（固定流程，不可重写）
+// call single AI API call (fixed flow, cannot be overridden)
 func (client *Client) call(systemPrompt, userPrompt string) (string, error) {
-	// 打印当前 AI 配置
+	// Print current AI configuration
 	client.logger.Infof("📡 [%s] Request AI Server: BaseURL: %s", client.String(), client.BaseURL)
 	client.logger.Debugf("[%s] UseFullURL: %v", client.String(), client.UseFullURL)
 	if len(client.APIKey) > 8 {
 		client.logger.Debugf("[%s]   API Key: %s...%s", client.String(), client.APIKey[:4], client.APIKey[len(client.APIKey)-4:])
 	}
 
-	// Step 1: 构建请求体（通过 hooks 实现动态分派）
+	// Step 1: Build request body (via hooks for dynamic dispatch)
 	requestBody := client.hooks.buildMCPRequestBody(systemPrompt, userPrompt)
 
-	// Step 2: 序列化请求体（通过 hooks 实现动态分派）
+	// Step 2: Serialize request body (via hooks for dynamic dispatch)
 	jsonData, err := client.hooks.marshalRequestBody(requestBody)
 	if err != nil {
 		return "", err
 	}
 
-	// Step 3: 构建 URL（通过 hooks 实现动态分派）
+	// Step 3: Build URL (via hooks for dynamic dispatch)
 	url := client.hooks.buildUrl()
-	client.logger.Infof("📡 [MCP %s] 请求 URL: %s", client.String(), url)
+	client.logger.Infof("📡 [MCP %s] Request URL: %s", client.String(), url)
 
-	// Step 4: 创建 HTTP 请求（固定逻辑）
+	// Step 4: Create HTTP request (fixed logic)
 	req, err := client.hooks.buildRequest(url, jsonData)
 	if err != nil {
-		return "", fmt.Errorf("创建请求失败: %w", err)
+		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Step 5: 发送 HTTP 请求（固定逻辑）
+	// Step 5: Send HTTP request (fixed logic)
 	resp, err := client.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("发送请求失败: %w", err)
+		return "", fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// Step 6: 读取响应体（固定逻辑）
+	// Step 6: Read response body (fixed logic)
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("读取响应失败: %w", err)
+		return "", fmt.Errorf("failed to read response: %w", err)
 	}
 
-	// Step 7: 检查 HTTP 状态码（固定逻辑）
+	// Step 7: Check HTTP status code (fixed logic)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API返回错误 (status %d): %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("API returned error (status %d): %s", resp.StatusCode, string(body))
 	}
 
-	// Step 8: 解析响应（通过 hooks 实现动态分派）
+	// Step 8: Parse response (via hooks for dynamic dispatch)
 	result, err := client.hooks.parseMCPResponse(body)
 	if err != nil {
 		return "", fmt.Errorf("fail to parse AI server response: %w", err)
@@ -316,10 +349,10 @@ func (client *Client) String() string {
 		client.Provider, client.Model)
 }
 
-// isRetryableError 判断错误是否可重试（网络错误、超时等）
+// isRetryableError determines if error is retryable (network errors, timeouts, etc.)
 func (client *Client) isRetryableError(err error) bool {
 	errStr := err.Error()
-	// 网络错误、超时、EOF等可以重试
+	// Network errors, timeouts, EOF, etc. can be retried
 	for _, retryable := range client.config.RetryableErrors {
 		if strings.Contains(errStr, retryable) {
 			return true
@@ -329,18 +362,18 @@ func (client *Client) isRetryableError(err error) bool {
 }
 
 // ============================================================
-// 构建器模式 API（高级功能）
+// Builder Pattern API (Advanced Features)
 // ============================================================
 
-// CallWithRequest 使用 Request 对象调用 AI API（支持高级功能）
+// CallWithRequest calls AI API using Request object (supports advanced features)
 //
-// 此方法支持：
-// - 多轮对话历史
-// - 精细参数控制（temperature、top_p、penalties 等）
+// This method supports:
+// - Multi-turn conversation history
+// - Fine-grained parameter control (temperature, top_p, penalties, etc.)
 // - Function Calling / Tools
-// - 流式响应（未来支持）
+// - Streaming response (future support)
 //
-// 使用示例：
+// Usage example:
 //   request := NewRequestBuilder().
 //       WithSystemPrompt("You are helpful").
 //       WithUserPrompt("Hello").
@@ -349,93 +382,93 @@ func (client *Client) isRetryableError(err error) bool {
 //   result, err := client.CallWithRequest(request)
 func (client *Client) CallWithRequest(req *Request) (string, error) {
 	if client.APIKey == "" {
-		return "", fmt.Errorf("AI API密钥未设置，请先调用 SetAPIKey")
+		return "", fmt.Errorf("AI API key not set, please call SetAPIKey first")
 	}
 
-	// 如果 Request 中没有设置 Model，使用 Client 的 Model
+	// If Model is not set in Request, use Client's Model
 	if req.Model == "" {
 		req.Model = client.Model
 	}
 
-	// 固定的重试流程
+	// Fixed retry flow
 	var lastErr error
 	maxRetries := client.config.MaxRetries
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if attempt > 1 {
-			client.logger.Warnf("⚠️  AI API调用失败，正在重试 (%d/%d)...", attempt, maxRetries)
+			client.logger.Warnf("⚠️  AI API call failed, retrying (%d/%d)...", attempt, maxRetries)
 		}
 
-		// 调用单次请求
+		// Call single request
 		result, err := client.callWithRequest(req)
 		if err == nil {
 			if attempt > 1 {
-				client.logger.Infof("✓ AI API重试成功")
+				client.logger.Infof("✓ AI API retry succeeded")
 			}
 			return result, nil
 		}
 
 		lastErr = err
-		// 判断是否可重试
+		// Check if error is retryable
 		if !client.hooks.isRetryableError(err) {
 			return "", err
 		}
 
-		// 重试前等待
+		// Wait before retry
 		if attempt < maxRetries {
 			waitTime := client.config.RetryWaitBase * time.Duration(attempt)
-			client.logger.Infof("⏳ 等待%v后重试...", waitTime)
+			client.logger.Infof("⏳ Waiting %v before retry...", waitTime)
 			time.Sleep(waitTime)
 		}
 	}
 
-	return "", fmt.Errorf("重试%d次后仍然失败: %w", maxRetries, lastErr)
+	return "", fmt.Errorf("still failed after %d retries: %w", maxRetries, lastErr)
 }
 
-// callWithRequest 单次调用 AI API（使用 Request 对象）
+// callWithRequest single AI API call (using Request object)
 func (client *Client) callWithRequest(req *Request) (string, error) {
-	// 打印当前 AI 配置
+	// Print current AI configuration
 	client.logger.Infof("📡 [%s] Request AI Server with Builder: BaseURL: %s", client.String(), client.BaseURL)
 	client.logger.Debugf("[%s] Messages count: %d", client.String(), len(req.Messages))
 
-	// 构建请求体（从 Request 对象）
+	// Build request body (from Request object)
 	requestBody := client.buildRequestBodyFromRequest(req)
 
-	// 序列化请求体
+	// Serialize request body
 	jsonData, err := client.hooks.marshalRequestBody(requestBody)
 	if err != nil {
 		return "", err
 	}
 
-	// 构建 URL
+	// Build URL
 	url := client.hooks.buildUrl()
-	client.logger.Infof("📡 [MCP %s] 请求 URL: %s", client.String(), url)
+	client.logger.Infof("📡 [MCP %s] Request URL: %s", client.String(), url)
 
-	// 创建 HTTP 请求
+	// Create HTTP request
 	httpReq, err := client.hooks.buildRequest(url, jsonData)
 	if err != nil {
-		return "", fmt.Errorf("创建请求失败: %w", err)
+		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// 发送 HTTP 请求
+	// Send HTTP request
 	resp, err := client.httpClient.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("发送请求失败: %w", err)
+		return "", fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// 读取响应体
+	// Read response body
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("读取响应失败: %w", err)
+		return "", fmt.Errorf("failed to read response: %w", err)
 	}
 
-	// 检查 HTTP 状态码
+	// Check HTTP status code
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API返回错误 (status %d): %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("API returned error (status %d): %s", resp.StatusCode, string(body))
 	}
 
-	// 解析响应
+	// Parse response
 	result, err := client.hooks.parseMCPResponse(body)
 	if err != nil {
 		return "", fmt.Errorf("fail to parse AI server response: %w", err)
@@ -444,9 +477,9 @@ func (client *Client) callWithRequest(req *Request) (string, error) {
 	return result, nil
 }
 
-// buildRequestBodyFromRequest 从 Request 对象构建请求体
+// buildRequestBodyFromRequest builds request body from Request object
 func (client *Client) buildRequestBodyFromRequest(req *Request) map[string]any {
-	// 转换 Message 为 API 格式
+	// Convert Message to API format
 	messages := make([]map[string]string, 0, len(req.Messages))
 	for _, msg := range req.Messages {
 		messages = append(messages, map[string]string{
@@ -455,25 +488,30 @@ func (client *Client) buildRequestBodyFromRequest(req *Request) map[string]any {
 		})
 	}
 
-	// 构建基础请求体
+	// Build basic request body
 	requestBody := map[string]interface{}{
 		"model":    req.Model,
 		"messages": messages,
 	}
 
-	// 添加可选参数（只添加非 nil 的参数）
+	// Add optional parameters (only add non-nil parameters)
 	if req.Temperature != nil {
 		requestBody["temperature"] = *req.Temperature
 	} else {
-		// 如果 Request 中没有设置，使用 Client 的配置
+		// If not set in Request, use Client's configuration
 		requestBody["temperature"] = client.config.Temperature
 	}
 
+	// OpenAI newer models use max_completion_tokens instead of max_tokens
+	tokenKey := "max_tokens"
+	if client.Provider == ProviderOpenAI {
+		tokenKey = "max_completion_tokens"
+	}
 	if req.MaxTokens != nil {
-		requestBody["max_tokens"] = *req.MaxTokens
+		requestBody[tokenKey] = *req.MaxTokens
 	} else {
-		// 如果 Request 中没有设置，使用 Client 的 MaxTokens
-		requestBody["max_tokens"] = client.MaxTokens
+		// If not set in Request, use Client's MaxTokens
+		requestBody[tokenKey] = client.MaxTokens
 	}
 
 	if req.TopP != nil {

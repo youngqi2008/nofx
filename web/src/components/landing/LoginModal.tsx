@@ -15,7 +15,7 @@ export default function LoginModal({ onClose, language }: LoginModalProps) {
   return (
     <motion.div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0, 0, 0, 0.5)' }}
+      style={{ background: 'rgba(0, 0, 0, 0.8)' }}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -24,8 +24,8 @@ export default function LoginModal({ onClose, language }: LoginModalProps) {
       <motion.div
         className="relative max-w-md w-full rounded-2xl p-8"
         style={{
-          background: 'var(--panel-bg)',
-          border: '1px solid var(--panel-border)',
+          background: 'var(--brand-dark-gray)',
+          border: '1px solid rgba(240, 185, 11, 0.2)',
         }}
         initial={{ scale: 0.9, y: 50 }}
         animate={{ scale: 1, y: 0 }}
@@ -43,9 +43,9 @@ export default function LoginModal({ onClose, language }: LoginModalProps) {
         </motion.button>
         <h2
           className="text-2xl font-bold mb-6"
-          style={{ color: 'var(--text-primary)' }}
+          style={{ color: 'var(--brand-light-gray)' }}
         >
-          {t('accessAresPlatform', language)}
+          {t('accessNofxPlatform', language)}
         </h2>
         <p className="text-sm mb-6" style={{ color: 'var(--text-secondary)' }}>
           {t('loginRegisterPrompt', language)}
@@ -59,12 +59,12 @@ export default function LoginModal({ onClose, language }: LoginModalProps) {
             }}
             className="block w-full px-6 py-3 rounded-lg font-semibold text-center"
             style={{
-              background: 'var(--accent-red)',
-              color: 'var(--brand-white)',
+              background: 'var(--brand-yellow)',
+              color: 'var(--brand-black)',
             }}
             whileHover={{
               scale: 1.05,
-              boxShadow: '0 10px 30px rgba(229, 0, 18, 0.4)',
+              boxShadow: '0 10px 30px rgba(240, 185, 11, 0.4)',
             }}
             whileTap={{ scale: 0.95 }}
           >
@@ -79,11 +79,11 @@ export default function LoginModal({ onClose, language }: LoginModalProps) {
               }}
               className="block w-full px-6 py-3 rounded-lg font-semibold text-center"
               style={{
-                background: 'var(--panel-bg)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--panel-border)',
+                background: 'var(--brand-dark-gray)',
+                color: 'var(--brand-light-gray)',
+                border: '1px solid rgba(240, 185, 11, 0.2)',
               }}
-              whileHover={{ scale: 1.05, borderColor: 'var(--accent-red)' }}
+              whileHover={{ scale: 1.05, borderColor: 'var(--brand-yellow)' }}
               whileTap={{ scale: 0.95 }}
             >
               {t('registerNewAccount', language)}

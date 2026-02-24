@@ -1,68 +1,157 @@
 package config
 
 import (
-	"encoding/json"
-	"fmt"
-	"log"
+	"nofx/experience"
+	"nofx/mcp"
 	"os"
+	"strconv"
+	"strings"
 )
 
-// LeverageConfig 杠杆配置
-type LeverageConfig struct {
-	BTCETHLeverage  int `json:"btc_eth_leverage"` // BTC和ETH的杠杆倍数（主账户建议5-50，子账户≤5）
-	AltcoinLeverage int `json:"altcoin_leverage"` // 山寨币的杠杆倍数（主账户建议5-20，子账户≤5）
-}
+// Global configuration instance
+var global *Config
 
-// LogConfig 日志配置
-type LogConfig struct {
-	Level    string          `json:"level"`    // 日志级别: debug, info, warn, error (默认: info)
-	Telegram *TelegramConfig `json:"telegram"` // Telegram推送配置（可选）
-}
-
-// TelegramConfig Telegram推送配置（简化版，只保留必需字段）
-type TelegramConfig struct {
-	Enabled  bool   `json:"enabled"`   // 是否启用（默认: false）
-	BotToken string `json:"bot_token"` // Bot Token
-	ChatID   int64  `json:"chat_id"`   // Chat ID
-	MinLevel string `json:"min_level"` // 最低日志级别，该级别及以上的日志会推送到Telegram（可选，默认: error）
-}
-
-// Config 总配置
+// Config is the global configuration (loaded from .env)
+// Only contains truly global config, trading related config is at trader/strategy level
 type Config struct {
-	BetaMode           bool           `json:"beta_mode"`
-	APIServerPort      int            `json:"api_server_port"`
-	UseDefaultCoins    bool           `json:"use_default_coins"`
-	DefaultCoins       []string       `json:"default_coins"`
-	CoinPoolAPIURL     string         `json:"coin_pool_api_url"`
-	OITopAPIURL        string         `json:"oi_top_api_url"`
-	MaxDailyLoss       float64        `json:"max_daily_loss"`
-	MaxDrawdown        float64        `json:"max_drawdown"`
-	StopTradingMinutes int            `json:"stop_trading_minutes"`
-	Leverage           LeverageConfig `json:"leverage"`
-	JWTSecret          string         `json:"jwt_secret"`
-	DataKLineTime      string         `json:"data_k_line_time"`
-	Log                *LogConfig     `json:"log"` // 日志配置
+	// Service configuration
+	APIServerPort       int
+	JWTSecret           string
+	RegistrationEnabled bool
+	MaxUsers            int // Maximum number of users allowed (0 = unlimited, default = 10)
+
+	// Database configuration
+	DBType     string // sqlite or postgres
+	DBPath     string // SQLite database file path
+	DBHost     string // PostgreSQL host
+	DBPort     int    // PostgreSQL port
+	DBUser     string // PostgreSQL user
+	DBPassword string // PostgreSQL password
+	DBName     string // PostgreSQL database name
+	DBSSLMode  string // PostgreSQL SSL mode
+
+	// Security configuration
+	// TransportEncryption enables browser-side encryption for API keys
+	// Requires HTTPS or localhost. Set to false for HTTP access via IP.
+	TransportEncryption bool
+
+	// Experience improvement (anonymous usage statistics)
+	// Helps us understand product usage and improve the experience
+	// Set EXPERIENCE_IMPROVEMENT=false to disable
+	ExperienceImprovement bool
+
+	// Market data provider API keys
+	AlpacaAPIKey    string // Alpaca API key for US stocks
+	AlpacaSecretKey string // Alpaca secret key
+	TwelveDataKey   string // TwelveData API key for forex & metals
 }
 
-// LoadConfig 从文件加载配置
-func LoadConfig(filename string) (*Config, error) {
-	// 检查filename是否存在
-	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		log.Printf("📄 %s不存在，使用默认配置", filename)
-		return &Config{}, nil
+// Init initializes global configuration (from .env)
+func Init() {
+	cfg := &Config{
+		APIServerPort:         8080,
+		RegistrationEnabled:   true,
+		MaxUsers:              10,   // Default: 10 users allowed
+		ExperienceImprovement: true, // Default: enabled to help improve the product
+		// Database defaults
+		DBType:    "sqlite",
+		DBPath:    "data/data.db",
+		DBHost:    "localhost",
+		DBPort:    5432,
+		DBUser:    "postgres",
+		DBName:    "nofx",
+		DBSSLMode: "disable",
 	}
 
-	// 读取 filename
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, fmt.Errorf("读取%s失败: %w", filename, err)
+	// Load from environment variables
+	if v := os.Getenv("JWT_SECRET"); v != "" {
+		cfg.JWTSecret = strings.TrimSpace(v)
+	}
+	if cfg.JWTSecret == "" {
+		cfg.JWTSecret = "default-jwt-secret-change-in-production"
 	}
 
-	// 解析JSON
-	var configFile Config
-	if err := json.Unmarshal(data, &configFile); err != nil {
-		return nil, fmt.Errorf("解析%s失败: %w", filename, err)
+	if v := os.Getenv("REGISTRATION_ENABLED"); v != "" {
+		cfg.RegistrationEnabled = strings.ToLower(v) == "true"
 	}
 
-	return &configFile, nil
+	if v := os.Getenv("MAX_USERS"); v != "" {
+		if maxUsers, err := strconv.Atoi(v); err == nil && maxUsers >= 0 {
+			cfg.MaxUsers = maxUsers
+		}
+	}
+
+	if v := os.Getenv("API_SERVER_PORT"); v != "" {
+		if port, err := strconv.Atoi(v); err == nil && port > 0 {
+			cfg.APIServerPort = port
+		}
+	}
+
+	// Transport encryption: default false for easier deployment
+	// Set TRANSPORT_ENCRYPTION=true to enable (requires HTTPS or localhost)
+	if v := os.Getenv("TRANSPORT_ENCRYPTION"); v != "" {
+		cfg.TransportEncryption = strings.ToLower(v) == "true"
+	}
+
+	// Experience improvement: anonymous usage statistics
+	// Default enabled, set EXPERIENCE_IMPROVEMENT=false to disable
+	if v := os.Getenv("EXPERIENCE_IMPROVEMENT"); v != "" {
+		cfg.ExperienceImprovement = strings.ToLower(v) != "false"
+	}
+
+	// Market data provider API keys
+	cfg.AlpacaAPIKey = os.Getenv("ALPACA_API_KEY")
+	cfg.AlpacaSecretKey = os.Getenv("ALPACA_SECRET_KEY")
+	cfg.TwelveDataKey = os.Getenv("TWELVEDATA_API_KEY")
+
+	// Database configuration
+	if v := os.Getenv("DB_TYPE"); v != "" {
+		cfg.DBType = strings.ToLower(v)
+	}
+	if v := os.Getenv("DB_PATH"); v != "" {
+		cfg.DBPath = v
+	}
+	if v := os.Getenv("DB_HOST"); v != "" {
+		cfg.DBHost = v
+	}
+	if v := os.Getenv("DB_PORT"); v != "" {
+		if port, err := strconv.Atoi(v); err == nil && port > 0 {
+			cfg.DBPort = port
+		}
+	}
+	if v := os.Getenv("DB_USER"); v != "" {
+		cfg.DBUser = v
+	}
+	if v := os.Getenv("DB_PASSWORD"); v != "" {
+		cfg.DBPassword = v
+	}
+	if v := os.Getenv("DB_NAME"); v != "" {
+		cfg.DBName = v
+	}
+	if v := os.Getenv("DB_SSLMODE"); v != "" {
+		cfg.DBSSLMode = v
+	}
+
+	global = cfg
+
+	// Initialize experience improvement (installation ID will be set after database init)
+	experience.Init(cfg.ExperienceImprovement, "")
+
+	// Set up AI token usage tracking callback
+	mcp.TokenUsageCallback = func(usage mcp.TokenUsage) {
+		experience.TrackAIUsage(experience.AIUsageEvent{
+			ModelProvider: usage.Provider,
+			ModelName:     usage.Model,
+			InputTokens:   usage.PromptTokens,
+			OutputTokens:  usage.CompletionTokens,
+		})
+	}
+}
+
+// Get returns the global configuration
+func Get() *Config {
+	if global == nil {
+		Init()
+	}
+	return global
 }

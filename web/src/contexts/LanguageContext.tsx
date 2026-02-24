@@ -3,6 +3,7 @@ import type { Language } from '../i18n/translations'
 
 interface LanguageContextType {
   language: Language
+  setLanguage: (lang: Language) => void
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(
@@ -10,11 +11,13 @@ const LanguageContext = createContext<LanguageContextType | undefined>(
 )
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  // 固定使用中文，不再提供切换功能
+  // Always use Chinese, no language switching
   const language: Language = 'zh'
 
   return (
-    <LanguageContext.Provider value={{ language }}>
+    <LanguageContext.Provider
+      value={{ language, setLanguage: () => {} }}
+    >
       {children}
     </LanguageContext.Provider>
   )
