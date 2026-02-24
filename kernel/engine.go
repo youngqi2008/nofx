@@ -1550,26 +1550,22 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 	var sb strings.Builder
 	indicators := e.config.Indicators
 
-	// 明确标注币种
+	// 明确标注币种 + 当前时刻汇总（主周期）
 	sb.WriteString(fmt.Sprintf("=== %s Market Data ===\n\n", data.Symbol))
-	sb.WriteString(fmt.Sprintf("current_price = %.4f", data.CurrentPrice))
-
+	sb.WriteString("**Current (primary TF):** ")
+	sb.WriteString(fmt.Sprintf("price = %.4f", data.CurrentPrice))
 	if indicators.EnableEMA {
-		sb.WriteString(fmt.Sprintf(", current_ema20 = %.3f", data.CurrentEMA20))
+		sb.WriteString(fmt.Sprintf(", ema20 = %.3f, ema50 = %.3f", data.CurrentEMA20, data.CurrentEMA50))
 	}
-
 	if indicators.EnableMACD {
-		sb.WriteString(fmt.Sprintf(", current_macd = %.3f", data.CurrentMACD))
+		sb.WriteString(fmt.Sprintf(", macd = %.3f", data.CurrentMACD))
 	}
-
 	if indicators.EnableRSI {
-		sb.WriteString(fmt.Sprintf(", current_rsi7 = %.3f", data.CurrentRSI7))
+		sb.WriteString(fmt.Sprintf(", rsi7 = %.3f, rsi14 = %.3f", data.CurrentRSI7, data.CurrentRSI14))
 	}
-
 	if indicators.EnableKDJ {
-		sb.WriteString(fmt.Sprintf(", current_k = %.3f, current_d = %.3f, current_j = %.3f", data.CurrentK, data.CurrentD, data.CurrentJ))
+		sb.WriteString(fmt.Sprintf(", k = %.3f, d = %.3f, j = %.3f", data.CurrentK, data.CurrentD, data.CurrentJ))
 	}
-
 	sb.WriteString("\n\n")
 
 	if indicators.EnableOI || indicators.EnableFundingRate {
@@ -1684,7 +1680,101 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 	return sb.String()
 }
 
+// lastFloat returns the last element of slice, or 0 if empty.
+func lastFloat(s []float64) float64 {
+	if len(s) == 0 {
+		return 0
+	}
+	return s[len(s)-1]
+}
+
+func (e *StrategyEngine) writeTimeframeSummary(sb *strings.Builder, data *market.TimeframeSeriesData, indicators store.IndicatorConfig) {
+	// 当前时刻（本周期最后一根）
+	var curParts []string
+	if len(data.Klines) > 0 {
+		curParts = append(curParts, fmt.Sprintf("price = %.4f", data.Klines[len(data.Klines)-1].Close))
+	}
+	if indicators.EnableEMA {
+		if len(data.EMA20Values) > 0 {
+			curParts = append(curParts, fmt.Sprintf("ema20 = %.3f", lastFloat(data.EMA20Values)))
+		}
+		if len(data.EMA50Values) > 0 {
+			curParts = append(curParts, fmt.Sprintf("ema50 = %.3f", lastFloat(data.EMA50Values)))
+		}
+	}
+	if indicators.EnableMACD && len(data.MACDValues) > 0 {
+		curParts = append(curParts, fmt.Sprintf("macd = %.3f", lastFloat(data.MACDValues)))
+	}
+	if indicators.EnableRSI {
+		if len(data.RSI7Values) > 0 {
+			curParts = append(curParts, fmt.Sprintf("rsi7 = %.3f", lastFloat(data.RSI7Values)))
+		}
+		if len(data.RSI14Values) > 0 {
+			curParts = append(curParts, fmt.Sprintf("rsi14 = %.3f", lastFloat(data.RSI14Values)))
+		}
+	}
+	if indicators.EnableATR && data.ATR14 > 0 {
+		curParts = append(curParts, fmt.Sprintf("ATR14 = %.4f", data.ATR14))
+	}
+	if indicators.EnableBOLL {
+		if len(data.BOLLUpper) > 0 {
+			curParts = append(curParts, fmt.Sprintf("BOLL Upper = %.3f", lastFloat(data.BOLLUpper)))
+		}
+		if len(data.BOLLMiddle) > 0 {
+			curParts = append(curParts, fmt.Sprintf("BOLL Middle = %.3f", lastFloat(data.BOLLMiddle)))
+		}
+		if len(data.BOLLLower) > 0 {
+			curParts = append(curParts, fmt.Sprintf("BOLL Lower = %.3f", lastFloat(data.BOLLLower)))
+		}
+	}
+	if indicators.EnableKDJ {
+		if len(data.KValues) > 0 {
+			curParts = append(curParts, fmt.Sprintf("k = %.3f, d = %.3f, j = %.3f", lastFloat(data.KValues), lastFloat(data.DValues), lastFloat(data.JValues)))
+		}
+	}
+	if len(curParts) > 0 {
+		sb.WriteString("**Current (this TF):** " + strings.Join(curParts, ", ") + "\n\n")
+	}
+
+	// 最近10根 K 线：max, min, avg
+	if data.Last10 != nil {
+		sb.WriteString("**Last 10 bars (max / min / avg):**\n")
+		e.writeBarStatsLine(sb, data.Last10, indicators)
+		sb.WriteString("\n")
+	}
+	// 最近6根 K 线：max, min, avg
+	if data.Last6 != nil {
+		sb.WriteString("**Last 6 bars (max / min / avg):**\n")
+		e.writeBarStatsLine(sb, data.Last6, indicators)
+		sb.WriteString("\n")
+	}
+}
+
+func (e *StrategyEngine) writeBarStatsLine(sb *strings.Builder, s *market.BarStatsPeriod, indicators store.IndicatorConfig) {
+	sb.WriteString(fmt.Sprintf("  price: %.4f / %.4f / %.4f\n", s.PriceMax, s.PriceMin, s.PriceAvg))
+	if indicators.EnableEMA {
+		sb.WriteString(fmt.Sprintf("  ema20: %.3f / %.3f / %.3f, ema50: %.3f / %.3f / %.3f\n", s.EMA20Max, s.EMA20Min, s.EMA20Avg, s.EMA50Max, s.EMA50Min, s.EMA50Avg))
+	}
+	if indicators.EnableMACD {
+		sb.WriteString(fmt.Sprintf("  macd: %.3f / %.3f / %.3f\n", s.MACDMax, s.MACDMin, s.MACDAvg))
+	}
+	if indicators.EnableRSI {
+		sb.WriteString(fmt.Sprintf("  rsi7: %.3f / %.3f / %.3f, rsi14: %.3f / %.3f / %.3f\n", s.RSI7Max, s.RSI7Min, s.RSI7Avg, s.RSI14Max, s.RSI14Min, s.RSI14Avg))
+	}
+	if indicators.EnableBOLL {
+		sb.WriteString(fmt.Sprintf("  BOLL Upper: %.3f / %.3f / %.3f, Middle: %.3f / %.3f / %.3f, Lower: %.3f / %.3f / %.3f\n",
+			s.BOLLUpperMax, s.BOLLUpperMin, s.BOLLUpperAvg, s.BOLLMiddleMax, s.BOLLMiddleMin, s.BOLLMiddleAvg, s.BOLLLowerMax, s.BOLLLowerMin, s.BOLLLowerAvg))
+	}
+	if indicators.EnableKDJ {
+		sb.WriteString(fmt.Sprintf("  KDJ k: %.3f / %.3f / %.3f, d: %.3f / %.3f / %.3f, j: %.3f / %.3f / %.3f\n",
+			s.KMax, s.KMin, s.KAvg, s.DMax, s.DMin, s.DAvg, s.JMax, s.JMin, s.JAvg))
+	}
+}
+
 func (e *StrategyEngine) formatTimeframeSeriesData(sb *strings.Builder, data *market.TimeframeSeriesData, indicators store.IndicatorConfig) {
+	// --- 当前时刻 + 最近10根/6根汇总（按周期开关） ---
+	e.writeTimeframeSummary(sb, data, indicators)
+
 	if len(data.Klines) > 0 {
 		sb.WriteString("Time(UTC)      Open      High      Low       Close     Volume\n")
 		for i, k := range data.Klines {

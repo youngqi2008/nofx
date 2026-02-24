@@ -9,8 +9,10 @@ type Data struct {
 	PriceChange1h     float64 // 1-hour price change percentage
 	PriceChange4h     float64 // 4-hour price change percentage
 	CurrentEMA20      float64
+	CurrentEMA50      float64
 	CurrentMACD       float64
 	CurrentRSI7       float64
+	CurrentRSI14      float64
 	CurrentK          float64 // KDJ K value
 	CurrentD          float64 // KDJ D value
 	CurrentJ          float64 // KDJ J value
@@ -20,6 +22,22 @@ type Data struct {
 	LongerTermContext *LongerTermData
 	// Multi-timeframe data (new)
 	TimeframeData map[string]*TimeframeSeriesData `json:"timeframe_data,omitempty"`
+}
+
+// BarStatsPeriod max/min/avg of last N bars for key series (used for last 10 and last 6 bars)
+type BarStatsPeriod struct {
+	PriceMax, PriceMin, PriceAvg                 float64
+	EMA20Max, EMA20Min, EMA20Avg                float64
+	EMA50Max, EMA50Min, EMA50Avg                float64
+	MACDMax, MACDMin, MACDAvg                   float64
+	RSI7Max, RSI7Min, RSI7Avg                   float64
+	RSI14Max, RSI14Min, RSI14Avg                float64
+	BOLLUpperMax, BOLLUpperMin, BOLLUpperAvg    float64
+	BOLLMiddleMax, BOLLMiddleMin, BOLLMiddleAvg float64
+	BOLLLowerMax, BOLLLowerMin, BOLLLowerAvg    float64
+	KMax, KMin, KAvg                             float64
+	DMax, DMin, DAvg                             float64
+	JMax, JMin, JAvg                             float64
 }
 
 // KlineBar single kline bar with OHLCV data
@@ -52,6 +70,9 @@ type TimeframeSeriesData struct {
 	KValues []float64 `json:"k_values"` // K line
 	DValues []float64 `json:"d_values"` // D line
 	JValues []float64 `json:"j_values"` // J line
+	// Last N bars summary (max/min/avg)
+	Last10 *BarStatsPeriod `json:"last10,omitempty"`
+	Last6  *BarStatsPeriod `json:"last6,omitempty"`
 }
 
 // OIData Open Interest data

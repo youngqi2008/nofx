@@ -314,6 +314,7 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 
 		// Calculate series data for this timeframe (use count from config)
 		seriesData := calculateTimeframeSeries(klines, tf, count)
+		fillBarStats(seriesData)
 		timeframeData[tf] = seriesData
 	}
 
@@ -331,8 +332,10 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 	// Calculate current indicators (based on primary timeframe latest data)
 	currentPrice := primaryKlines[len(primaryKlines)-1].Close
 	currentEMA20 := calculateEMA(primaryKlines, 20)
+	currentEMA50 := calculateEMA(primaryKlines, 50)
 	currentMACD := calculateMACD(primaryKlines)
 	currentRSI7 := calculateRSI(primaryKlines, 7)
+	currentRSI14 := calculateRSI(primaryKlines, 14)
 	currentK, currentD, currentJ := calculateKDJ(primaryKlines, 9, 3, 3)
 
 	// Calculate price changes
@@ -354,8 +357,10 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 		PriceChange1h: priceChange1h,
 		PriceChange4h: priceChange4h,
 		CurrentEMA20:  currentEMA20,
+		CurrentEMA50:  currentEMA50,
 		CurrentMACD:   currentMACD,
 		CurrentRSI7:   currentRSI7,
+		CurrentRSI14:  currentRSI14,
 		CurrentK:      currentK,
 		CurrentD:      currentD,
 		CurrentJ:      currentJ,
@@ -459,6 +464,62 @@ func calculateTimeframeSeries(klines []Kline, timeframe string, count int) *Time
 	data.ATR14 = calculateATR(klines, 14)
 
 	return data
+}
+
+// maxMinAvgSlice returns max, min, avg of the last n elements of slice. If len(slice) < n, uses all.
+func maxMinAvgSlice(slice []float64, n int) (max, min, avg float64) {
+	if len(slice) == 0 {
+		return 0, 0, 0
+	}
+	start := len(slice) - n
+	if start < 0 {
+		start = 0
+	}
+	sub := slice[start:]
+	max, min = sub[0], sub[0]
+	sum := 0.0
+	for _, v := range sub {
+		if v > max {
+			max = v
+		}
+		if v < min {
+			min = v
+		}
+		sum += v
+	}
+	avg = sum / float64(len(sub))
+	return max, min, avg
+}
+
+// fillBarStats computes Last10 and Last6 BarStatsPeriod from series and attaches to d.
+func fillBarStats(d *TimeframeSeriesData) {
+	if d == nil {
+		return
+	}
+	// Price from Klines Close
+	prices := make([]float64, 0, len(d.Klines))
+	for _, k := range d.Klines {
+		prices = append(prices, k.Close)
+	}
+	d.Last10 = buildBarStatsPeriod(d, 10, prices)
+	d.Last6 = buildBarStatsPeriod(d, 6, prices)
+}
+
+func buildBarStatsPeriod(d *TimeframeSeriesData, n int, prices []float64) *BarStatsPeriod {
+	s := &BarStatsPeriod{}
+	s.PriceMax, s.PriceMin, s.PriceAvg = maxMinAvgSlice(prices, n)
+	s.EMA20Max, s.EMA20Min, s.EMA20Avg = maxMinAvgSlice(d.EMA20Values, n)
+	s.EMA50Max, s.EMA50Min, s.EMA50Avg = maxMinAvgSlice(d.EMA50Values, n)
+	s.MACDMax, s.MACDMin, s.MACDAvg = maxMinAvgSlice(d.MACDValues, n)
+	s.RSI7Max, s.RSI7Min, s.RSI7Avg = maxMinAvgSlice(d.RSI7Values, n)
+	s.RSI14Max, s.RSI14Min, s.RSI14Avg = maxMinAvgSlice(d.RSI14Values, n)
+	s.BOLLUpperMax, s.BOLLUpperMin, s.BOLLUpperAvg = maxMinAvgSlice(d.BOLLUpper, n)
+	s.BOLLMiddleMax, s.BOLLMiddleMin, s.BOLLMiddleAvg = maxMinAvgSlice(d.BOLLMiddle, n)
+	s.BOLLLowerMax, s.BOLLLowerMin, s.BOLLLowerAvg = maxMinAvgSlice(d.BOLLLower, n)
+	s.KMax, s.KMin, s.KAvg = maxMinAvgSlice(d.KValues, n)
+	s.DMax, s.DMin, s.DAvg = maxMinAvgSlice(d.DValues, n)
+	s.JMax, s.JMin, s.JAvg = maxMinAvgSlice(d.JValues, n)
+	return s
 }
 
 // calculatePriceChangeByBars calculates how many K-lines to look back for price change based on timeframe
