@@ -7,7 +7,7 @@
 ## 一、用户提示词由谁生成、结构概览
 
 - **入口**：`kernel/engine.go` 中的 `StrategyEngine.BuildUserPrompt(ctx, previousDecisionRecord)`。
-- **市场数据写入**：每个持仓/候选币种会调用 `formatMarketData(data)`，其输出即你在提示词里看到的「汇总 + 多周期明细」。
+- **市场数据写入**：每个持仓/候选币种会调用 `formatMarketData(data)`，其输出为**仅汇总**（每周期 Current + Last 10/6 bars），**不包含** K 线表与各指标序列明细。
 
 在用户提示词中的大致顺序为：
 
@@ -95,40 +95,11 @@ BTC: 97234.56 (1h: +1.23%, 4h: -0.45%) | MACD: 0.1234 | RSI: 58.00
 
 在提示词中搜索 **`Last 10 bars`** 或 **`Last 6 bars`** 可定位到这些汇总。
 
-### 4. 多周期 K 线表与序列（同一币种块内）
-
-在汇总之后，会按时间周期输出 K 线表与指标序列，例如：
-
-```
-=== 5M Timeframe (oldest → latest) ===
-
-Time(UTC)      Open      High      Low       Close     Volume
-...
-```
-
-表头与指标名（可直接在提示词中搜索）：
-
-| 指标名称（表头或标签） | 含义 |
-|------------------------|------|
-| `Time(UTC)`             | K 线时间列 |
-| `Open`                  | 开盘价 |
-| `High`                  | 最高价 |
-| `Low`                   | 最低价 |
-| `Close`                 | 收盘价 |
-| `Volume`                | 成交量 |
-| `  <- current`          | 标记当前（最后一根）K 线 |
-| `EMA20:`                | 该周期 EMA20 序列（若开启） |
-| `EMA50:`                | 该周期 EMA50 序列（若开启） |
-| `MACD:`                 | 该周期 MACD 序列（若开启） |
-| `RSI7:`                 | 该周期 RSI7 序列（若开启） |
-| `RSI14:`                | 该周期 RSI14 序列（若开启） |
-| `ATR14:`                | 该周期 ATR14（若开启） |
-| `BOLL Upper:` / `BOLL Middle:` / `BOLL Lower:` | 布林带（若开启） |
-| `KDJ K:` / `KDJ D:` / `KDJ J:` | KDJ 序列（若开启） |
+**说明**：用户提示词中**不再输出**各周期的 K 线表（Time/Open/High/Low/Close/Volume）以及 EMA/MACD/RSI/BOLL/KDJ 等指标序列明细，仅保留上述「当前时刻 + Last 10/6 bars 汇总」，以减少重复、控制篇幅。
 
 ---
 
-### 5. 量化数据块（若启用 QuantData）
+### 4. 量化数据块（若启用 QuantData）
 
 在部分币种下还会出现量化数据，例如：
 
@@ -155,11 +126,11 @@ Price Change: 5m: +0.12% | 15m: -0.30% | ...
 4. **找「BTC 的 1h/4h 与 MACD/RSI」**  
    - 搜：**`BTC:`**，通常就在提示词前几行。
 
-5. **找「某周期 K 线表」**  
-   - 搜：**`Time(UTC)`** 或 **`=== 5M Timeframe`**（把 5M 换成 1M/15M/1H 等）即可找到该周期的表格和后面的 EMA/MACD/RSI 等序列名。
+5. **找「某周期汇总」**  
+   - 搜：**`=== 1M Timeframe`** 或 **`=== 5M Timeframe`**（把 1M/5M 换成实际周期）可定位到该周期块；块内仅有 Current (this TF) 与 Last 10/6 bars 汇总，无 K 线表与指标序列。
 
 6. **区分持仓与候选**  
-   - 用户提示词中先出现 **## Current Positions**，再出现 **## Candidate Coins**；每个位置下面的 **`=== SYMBOL Market Data ===`** 即该币种的汇总+明细，指标名称同上。
+   - 用户提示词中先出现 **## Current Positions**，再出现 **## Candidate Coins**；每个位置下面的 **`=== SYMBOL Market Data ===`** 即该币种的汇总（含各周期 Current + Last 10/6 bars），无明细序列。
 
 ---
 
@@ -169,7 +140,7 @@ Price Change: 5m: +0.12% | 15m: -0.30% | ...
 |------|------------|
 | 用户提示词整体结构、BTC 行、Account、持仓/候选列表 | `kernel/engine.go`：`BuildUserPrompt`（约 1099 行起） |
 | 每个币种「汇总 + OI/Funding」输出 | `kernel/engine.go`：`formatMarketData`（约 1549 行起） |
-| 多周期 K 线表头与 EMA/MACD/RSI/ATR/BOLL/KDJ 标签 | `kernel/engine.go`：`formatTimeframeSeriesData`（约 1687 行起） |
+| 多周期仅汇总（Current + Last 10/6 bars，无 K 线表与指标序列） | `kernel/engine.go`：`formatTimeframeSeriesData` → `writeTimeframeSummary` |
 | 策略里指标开关（EnableEMA / EnableMACD / EnableRSI / EnableKDJ 等） | `store` 包中策略/指标配置 |
 
 把上述**指标名称**在日志或调试里打印出的完整 userPrompt 中做 Ctrl+F，即可精确找到对应汇总数据在用户提示词中的位置。
