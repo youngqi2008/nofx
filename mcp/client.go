@@ -17,13 +17,15 @@ const (
 )
 
 var (
-	DefaultTimeout = 120 * time.Second
+	DefaultTimeout = 180 * time.Second
 
 	MaxRetryTimes = 3
 
 	retryableErrors = []string{
 		"EOF",
 		"timeout",
+		"Timeout",       // Go HTTP client: "Client.Timeout or context cancellation while reading body"
+		"deadline",      // Go: "context deadline exceeded"
 		"connection reset",
 		"connection refused",
 		"temporary failure",
