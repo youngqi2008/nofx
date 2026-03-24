@@ -1352,7 +1352,8 @@ func (e *StrategyEngine) BuildUserPrompt(ctx *Context, previousDecisionRecord in
 
 	sb.WriteString("---\n\n")
 	// Previous decision context (if provided)
-	if previousDecisionRecord != nil {
+	// 暂不将上一轮决策拼入用户提示词；恢复时去掉 false &&
+	if false && previousDecisionRecord != nil {
 		lang := e.GetLanguage()
 		if lang == LangChinese {
 			sb.WriteString("## 🔄 上一轮决策上下文\n\n")
