@@ -11,6 +11,7 @@ type Data struct {
 	CurrentEMA20      float64
 	CurrentMACD       float64
 	CurrentRSI7       float64
+	CurrentATR14      float64 // Current ATR14 (based on primary timeframe)
 	CurrentK          float64 // KDJ K value
 	CurrentD          float64 // KDJ D value
 	CurrentJ          float64 // KDJ J value
@@ -43,7 +44,7 @@ type TimeframeSeriesData struct {
 	RSI7Values  []float64  `json:"rsi7_values"`  // RSI7 series
 	RSI14Values []float64  `json:"rsi14_values"` // RSI14 series
 	Volume      []float64  `json:"volume"`       // Volume series (deprecated, use Klines)
-	ATR14       float64    `json:"atr14"`        // ATR14
+	ATR14Values []float64  `json:"atr14_values,omitempty"` // ATR14 series (aligned with Klines, oldest → latest)
 	// Bollinger Bands (period 20, std dev multiplier 2)
 	BOLLUpper  []float64 `json:"boll_upper"`  // Upper band
 	BOLLMiddle []float64 `json:"boll_middle"` // Middle band (SMA)
@@ -62,16 +63,16 @@ type OIData struct {
 
 // IntradayData intraday data (3-minute interval)
 type IntradayData struct {
-	MidPrices   []float64
-	EMA20Values []float64
-	MACDValues  []float64
-	RSI7Values  []float64
-	RSI14Values []float64
-	KValues     []float64 // KDJ K
-	DValues     []float64 // KDJ D
-	JValues     []float64 // KDJ J
-	Volume      []float64
-	ATR14       float64
+	MidPrices    []float64 `json:"mid_prices,omitempty"`
+	EMA20Values  []float64 `json:"ema20_values,omitempty"`
+	MACDValues   []float64 `json:"macd_values,omitempty"`
+	RSI7Values   []float64 `json:"rsi7_values,omitempty"`
+	RSI14Values  []float64 `json:"rsi14_values,omitempty"`
+	KValues      []float64 `json:"k_values,omitempty"` // KDJ K
+	DValues      []float64 `json:"d_values,omitempty"` // KDJ D
+	JValues      []float64 `json:"j_values,omitempty"` // KDJ J
+	Volume       []float64 `json:"volume,omitempty"`
+	ATR14Values  []float64 `json:"atr14_values,omitempty"` // ATR14 series (oldest → latest)
 }
 
 // LongerTermData longer-term data (4-hour timeframe)

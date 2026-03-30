@@ -1567,6 +1567,10 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 		sb.WriteString(fmt.Sprintf(", current_rsi7 = %.3f", data.CurrentRSI7))
 	}
 
+	if indicators.EnableATR {
+		sb.WriteString(fmt.Sprintf(", current_atr14 = %.3f", data.CurrentATR14))
+	}
+
 	if indicators.EnableKDJ {
 		sb.WriteString(fmt.Sprintf(", current_k = %.3f, current_d = %.3f, current_j = %.3f", data.CurrentK, data.CurrentD, data.CurrentJ))
 	}
@@ -1638,7 +1642,13 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 			}
 
 			if indicators.EnableATR {
-				sb.WriteString(fmt.Sprintf("3m ATR (14-period): %.3f\n\n", data.IntradaySeries.ATR14))
+				if len(data.IntradaySeries.ATR14Values) > 0 {
+					atr := data.IntradaySeries.ATR14Values
+					if len(atr) > 11 {
+						atr = atr[len(atr)-11:]
+					}
+					sb.WriteString(fmt.Sprintf("ATR14: %s\n\n", formatFloatSlice(atr)))
+				}
 			}
 		}
 
@@ -1734,8 +1744,14 @@ func (e *StrategyEngine) formatTimeframeSeriesData(sb *strings.Builder, data *ma
 		}
 	}
 
-	if indicators.EnableATR && data.ATR14 > 0 {
-		sb.WriteString(fmt.Sprintf("ATR14: %.4f\n", data.ATR14))
+	if indicators.EnableATR {
+		if len(data.ATR14Values) > 0 {
+			atr := data.ATR14Values
+			if len(atr) > 11 {
+				atr = atr[len(atr)-11:]
+			}
+			sb.WriteString(fmt.Sprintf("ATR14: %s\n", formatFloatSlice(atr)))
+		}
 	}
 
 	if indicators.EnableBOLL && len(data.BOLLUpper) > 0 {

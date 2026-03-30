@@ -172,12 +172,19 @@ func TestCalculateIntradaySeries_ATR14(t *testing.T) {
 				t.Fatal("calculateIntradaySeries returned nil")
 			}
 
-			if tt.expectZero && data.ATR14 != 0 {
-				t.Errorf("ATR14 = %.3f, expected 0 (insufficient data)", data.ATR14)
+			// ATR14 single value has been removed from IntradayData; use ATR14Values instead.
+			hasATR := len(data.ATR14Values) > 0
+			lastATR := 0.0
+			if hasATR {
+				lastATR = data.ATR14Values[len(data.ATR14Values)-1]
 			}
 
-			if tt.expectNonZero && data.ATR14 <= 0 {
-				t.Errorf("ATR14 = %.3f, expected > 0", data.ATR14)
+			if tt.expectZero && (hasATR && lastATR != 0) {
+				t.Errorf("ATR14(last) = %.3f, expected 0 (insufficient data)", lastATR)
+			}
+
+			if tt.expectNonZero && (!hasATR || lastATR <= 0) {
+				t.Errorf("ATR14Values missing or non-positive, last=%.3f, expected > 0", lastATR)
 			}
 		})
 	}
@@ -322,9 +329,9 @@ func TestCalculateIntradaySeries_EmptyKlines(t *testing.T) {
 		t.Errorf("Volume length = %d, want 0", len(data.Volume))
 	}
 
-	// ATR14 should be 0 (insufficient data)
-	if data.ATR14 != 0 {
-		t.Errorf("ATR14 = %.3f, want 0", data.ATR14)
+	// ATR14Values should be empty (insufficient data)
+	if len(data.ATR14Values) != 0 {
+		t.Errorf("ATR14Values length = %d, want 0", len(data.ATR14Values))
 	}
 }
 

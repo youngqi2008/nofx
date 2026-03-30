@@ -191,6 +191,7 @@ func Get(symbol string) (*Data, error) {
 	currentEMA20 := calculateEMA(klines3m, 20)
 	currentMACD := calculateMACD(klines3m)
 	currentRSI7 := calculateRSI(klines3m, 7)
+	currentATR14 := calculateATR(klines3m, 14)
 	currentK, currentD, currentJ := calculateKDJ(klines3m, 9, 3, 3)
 
 	// Calculate price change percentage
@@ -236,6 +237,7 @@ func Get(symbol string) (*Data, error) {
 		CurrentEMA20:      currentEMA20,
 		CurrentMACD:       currentMACD,
 		CurrentRSI7:       currentRSI7,
+		CurrentATR14:      currentATR14,
 		CurrentK:          currentK,
 		CurrentD:          currentD,
 		CurrentJ:          currentJ,
@@ -333,6 +335,7 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 	currentEMA20 := calculateEMA(primaryKlines, 20)
 	currentMACD := calculateMACD(primaryKlines)
 	currentRSI7 := calculateRSI(primaryKlines, 7)
+	currentATR14 := calculateATR(primaryKlines, 14)
 	currentK, currentD, currentJ := calculateKDJ(primaryKlines, 9, 3, 3)
 
 	// Calculate price changes
@@ -356,6 +359,7 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 		CurrentEMA20:  currentEMA20,
 		CurrentMACD:   currentMACD,
 		CurrentRSI7:   currentRSI7,
+		CurrentATR14:  currentATR14,
 		CurrentK:      currentK,
 		CurrentD:      currentD,
 		CurrentJ:      currentJ,
@@ -371,6 +375,8 @@ func calculateTimeframeSeries(klines []Kline, timeframe string, count int) *Time
 		count = 10 // default
 	}
 
+	atr14Series := calculateATRSeries(klines, 14)
+
 	data := &TimeframeSeriesData{
 		Timeframe:   timeframe,
 		Klines:      make([]KlineBar, 0, count),
@@ -381,6 +387,7 @@ func calculateTimeframeSeries(klines []Kline, timeframe string, count int) *Time
 		RSI7Values:  make([]float64, 0, count),
 		RSI14Values: make([]float64, 0, count),
 		Volume:      make([]float64, 0, count),
+		ATR14Values: make([]float64, 0, count),
 		BOLLUpper:   make([]float64, 0, count),
 		BOLLMiddle:  make([]float64, 0, count),
 		BOLLLower:   make([]float64, 0, count),
@@ -453,11 +460,14 @@ func calculateTimeframeSeries(klines []Kline, timeframe string, count int) *Time
 			data.DValues = append(data.DValues, d)
 			data.JValues = append(data.JValues, j)
 		}
+
+		// ATR14 series (Wilder)
+		if i < len(atr14Series) && atr14Series[i] > 0 {
+			data.ATR14Values = append(data.ATR14Values, atr14Series[i])
+		}
 	}
 
 	// Calculate ATR14
-	data.ATR14 = calculateATR(klines, 14)
-
 	return data
 }
 
@@ -642,6 +652,46 @@ func calculateATR(klines []Kline, period int) float64 {
 	return atr
 }
 
+// calculateATRSeries calculates Wilder ATR series for the whole kline slice.
+// It returns a slice of the same length as klines.
+// Values are 0 until enough bars exist; index i corresponds to ATR computed up to klines[i] (inclusive).
+func calculateATRSeries(klines []Kline, period int) []float64 {
+	n := len(klines)
+	out := make([]float64, n)
+	if n <= period || period <= 0 {
+		return out
+	}
+
+	trs := make([]float64, n)
+	for i := 1; i < n; i++ {
+		high := klines[i].High
+		low := klines[i].Low
+		prevClose := klines[i-1].Close
+
+		tr1 := high - low
+		tr2 := math.Abs(high - prevClose)
+		tr3 := math.Abs(low - prevClose)
+
+		trs[i] = math.Max(tr1, math.Max(tr2, tr3))
+	}
+
+	// Initial ATR at index=period uses TR[1..period]
+	sum := 0.0
+	for i := 1; i <= period; i++ {
+		sum += trs[i]
+	}
+	atr := sum / float64(period)
+	out[period] = atr
+
+	// Wilder smoothing
+	for i := period + 1; i < n; i++ {
+		atr = (atr*float64(period-1) + trs[i]) / float64(period)
+		out[i] = atr
+	}
+
+	return out
+}
+
 // calculateBOLL calculates Bollinger Bands (upper, middle, lower)
 // period: typically 20, multiplier: typically 2
 func calculateBOLL(klines []Kline, period int, multiplier float64) (upper, middle, lower float64) {
@@ -720,6 +770,7 @@ func calculateIntradaySeries(klines []Kline) *IntradayData {
 		DValues:     make([]float64, 0, 10),
 		JValues:     make([]float64, 0, 10),
 		Volume:      make([]float64, 0, 10),
+		ATR14Values: make([]float64, 0, 10),
 	}
 
 	// Get latest 10 data points
@@ -727,6 +778,8 @@ func calculateIntradaySeries(klines []Kline) *IntradayData {
 	if start < 0 {
 		start = 0
 	}
+
+	atr14Series := calculateATRSeries(klines, 14)
 
 	for i := start; i < len(klines); i++ {
 		data.MidPrices = append(data.MidPrices, klines[i].Close)
@@ -761,10 +814,12 @@ func calculateIntradaySeries(klines []Kline) *IntradayData {
 			data.DValues = append(data.DValues, d)
 			data.JValues = append(data.JValues, j)
 		}
-	}
 
-	// Calculate 3m ATR14
-	data.ATR14 = calculateATR(klines, 14)
+		// ATR14 series (Wilder)
+		if i < len(atr14Series) && atr14Series[i] > 0 {
+			data.ATR14Values = append(data.ATR14Values, atr14Series[i])
+		}
+	}
 
 	return data
 }
@@ -959,7 +1014,13 @@ func Format(data *Data) string {
 			sb.WriteString(fmt.Sprintf("Volume: %s\n\n", formatFloatSlice(data.IntradaySeries.Volume)))
 		}
 
-		sb.WriteString(fmt.Sprintf("3m ATR (14‑period): %.3f\n\n", data.IntradaySeries.ATR14))
+		if len(data.IntradaySeries.ATR14Values) > 0 {
+			atr := data.IntradaySeries.ATR14Values
+			if len(atr) > 11 {
+				atr = atr[len(atr)-11:]
+			}
+			sb.WriteString(fmt.Sprintf("3m ATR14 (oldest → latest, last %d): %s\n\n", len(atr), formatFloatSlice(atr)))
+		}
 	}
 
 	if data.LongerTermContext != nil {
@@ -1049,8 +1110,12 @@ func formatTimeframeData(sb *strings.Builder, data *TimeframeSeriesData) {
 		sb.WriteString(fmt.Sprintf("RSI14: %s\n", formatFloatSlice(data.RSI14Values)))
 	}
 
-	if data.ATR14 > 0 {
-		sb.WriteString(fmt.Sprintf("ATR14: %.4f\n", data.ATR14))
+	if len(data.ATR14Values) > 0 {
+		atr := data.ATR14Values
+		if len(atr) > 11 {
+			atr = atr[len(atr)-11:]
+		}
+		sb.WriteString(fmt.Sprintf("ATR14: %s\n", formatFloatSlice(atr)))
 	}
 
 	sb.WriteString("\n")
@@ -1198,6 +1263,7 @@ func BuildDataFromKlines(symbol string, primary []Kline, longer []Kline) (*Data,
 		CurrentEMA20:      calculateEMA(primary, 20),
 		CurrentMACD:       calculateMACD(primary),
 		CurrentRSI7:       calculateRSI(primary, 7),
+		CurrentATR14:      calculateATR(primary, 14),
 		CurrentK:          k,
 		CurrentD:          d,
 		CurrentJ:          j,
