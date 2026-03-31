@@ -380,6 +380,7 @@ func calculateTimeframeSeries(klines []Kline, timeframe string, count int) *Time
 	data := &TimeframeSeriesData{
 		Timeframe:   timeframe,
 		Klines:      make([]KlineBar, 0, count),
+		KlinesFull:  make([]KlineBar, 0, maxInt(count, 120)),
 		MidPrices:   make([]float64, 0, count),
 		EMA20Values: make([]float64, 0, count),
 		EMA50Values: make([]float64, 0, count),
@@ -400,6 +401,13 @@ func calculateTimeframeSeries(klines []Kline, timeframe string, count int) *Time
 	start := len(klines) - count
 	if start < 0 {
 		start = 0
+	}
+
+	// Also keep a longer tail for internal calculations (without inflating prompt size).
+	fullCount := maxInt(count, 120)
+	startFull := len(klines) - fullCount
+	if startFull < 0 {
+		startFull = 0
 	}
 
 	for i := start; i < len(klines); i++ {
@@ -467,8 +475,26 @@ func calculateTimeframeSeries(klines []Kline, timeframe string, count int) *Time
 		}
 	}
 
+	for i := startFull; i < len(klines); i++ {
+		data.KlinesFull = append(data.KlinesFull, KlineBar{
+			Time:   klines[i].OpenTime,
+			Open:   klines[i].Open,
+			High:   klines[i].High,
+			Low:    klines[i].Low,
+			Close:  klines[i].Close,
+			Volume: klines[i].Volume,
+		})
+	}
+
 	// Calculate ATR14
 	return data
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // calculatePriceChangeByBars calculates how many K-lines to look back for price change based on timeframe

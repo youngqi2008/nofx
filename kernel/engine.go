@@ -350,6 +350,11 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 	primaryTimeframe := config.Indicators.Klines.PrimaryTimeframe
 	klineCount := config.Indicators.Klines.PrimaryCount
 
+	// Ensure required timeframes for market regime calculation exist.
+	// This does NOT change prompt length (market side keeps KlinesFull internal-only),
+	// but guarantees ComputeMarketRegime has 1h+15m data for every symbol.
+	timeframes = ensureTimeframes(timeframes, []string{"15m", "1h"})
+
 	// Compatible with old configuration
 	if len(timeframes) == 0 {
 		if primaryTimeframe != "" {
@@ -1553,6 +1558,18 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 
 	// 明确标注币种
 	sb.WriteString(fmt.Sprintf("=== %s Market Data ===\n\n", data.Symbol))
+
+	// Market regime classification (per your strategy definition)
+	// Requires 1h + 15m series in TimeframeData; falls back to 趋势不明确 with missing reasons.
+	if data.TimeframeData != nil {
+		if _, ok1h := data.TimeframeData["1h"]; ok1h {
+			if _, ok15 := data.TimeframeData["15m"]; ok15 {
+				reg := market.ComputeMarketRegime(data)
+				sb.WriteString(fmt.Sprintf("market_regime = %s\n\n", market.FormatMarketRegimeForPrompt(reg)))
+			}
+		}
+	}
+
 	sb.WriteString(fmt.Sprintf("current_price = %.4f", data.CurrentPrice))
 
 	if indicators.EnableEMA {
@@ -2200,6 +2217,32 @@ func detectLanguage(text string) Language {
 		}
 	}
 	return LangEnglish
+}
+
+func ensureTimeframes(timeframes []string, required []string) []string {
+	set := map[string]bool{}
+	out := make([]string, 0, len(timeframes)+len(required))
+	for _, tf := range timeframes {
+		tf = strings.TrimSpace(tf)
+		if tf == "" {
+			continue
+		}
+		if !set[tf] {
+			set[tf] = true
+			out = append(out, tf)
+		}
+	}
+	for _, tf := range required {
+		tf = strings.TrimSpace(tf)
+		if tf == "" {
+			continue
+		}
+		if !set[tf] {
+			set[tf] = true
+			out = append(out, tf)
+		}
+	}
+	return out
 }
 
 

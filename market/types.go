@@ -37,6 +37,9 @@ type KlineBar struct {
 type TimeframeSeriesData struct {
 	Timeframe   string     `json:"timeframe"`    // Timeframe identifier, e.g. "5m", "15m", "1h"
 	Klines      []KlineBar `json:"klines"`       // Full OHLCV kline data
+	// KlinesFull keeps a longer tail for internal calculations (not shown in prompts / JSON).
+	// It allows robust computations (EMA50, MACD, medians/quantiles) without inflating prompt size.
+	KlinesFull  []KlineBar `json:"-"` // internal only
 	MidPrices   []float64  `json:"mid_prices"`   // Price series (deprecated, kept for compatibility)
 	EMA20Values []float64  `json:"ema20_values"` // EMA20 series
 	EMA50Values []float64  `json:"ema50_values"` // EMA50 series
