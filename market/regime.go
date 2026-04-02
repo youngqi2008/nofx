@@ -645,7 +645,6 @@ func condWaveBollPrice(tf *TimeframeSeriesData, bullish bool) bool {
 		return false
 	}
 
-	ks := bars(tf)
 	p := ks[last].Close
 	if bullish {
 		if !(up0 > up1) {
