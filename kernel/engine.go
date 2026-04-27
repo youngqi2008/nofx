@@ -55,6 +55,7 @@ type PositionInfo struct {
 
 // AccountInfo account information
 type AccountInfo struct {
+	InitialBalance   float64 `json:"initial_balance"`   // Initial account balance baseline
 	TotalEquity      float64 `json:"total_equity"`      // Account equity
 	AvailableBalance float64 `json:"available_balance"` // Available balance
 	UnrealizedPnL    float64 `json:"unrealized_pnl"`    // Unrealized profit/loss
@@ -1111,7 +1112,16 @@ func (e *StrategyEngine) BuildUserPrompt(ctx *Context, previousDecisionRecord in
 	}
 
 	// Account information
-	sb.WriteString(fmt.Sprintf("Account: Equity %.2f | Balance %.2f (%.1f%%) | PnL %+.2f%% | Margin %.1f%% | Positions %d\n\n",
+	initialBalance := ctx.Account.InitialBalance
+	if initialBalance <= 0 {
+		initialBalance = ctx.Account.TotalEquity - ctx.Account.TotalPnL
+	}
+	if initialBalance <= 0 {
+		// Fallback for abnormal account snapshots to avoid misleading negative/zero baseline
+		initialBalance = ctx.Account.TotalEquity
+	}
+	sb.WriteString(fmt.Sprintf("Account: Initial %.2f | Equity %.2f | Balance %.2f (%.1f%%) | PnL %+.2f%% | Margin %.1f%% | Positions %d\n\n",
+		initialBalance,
 		ctx.Account.TotalEquity,
 		ctx.Account.AvailableBalance,
 		(ctx.Account.AvailableBalance/ctx.Account.TotalEquity)*100,

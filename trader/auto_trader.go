@@ -1,10 +1,12 @@
 package trader
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
 	"nofx/kernel"
 	"nofx/experience"
 	"nofx/logger"
@@ -15,6 +17,8 @@ import (
 	"sync"
 	"time"
 )
+
+const wechatWebhookURL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=04f793c4-20ee-4a4d-9c26-9f66020550f1"
 
 // AutoTraderConfig auto trading configuration (simplified version - AI makes all decisions)
 type AutoTraderConfig struct {
@@ -884,6 +888,7 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 		BTCETHLeverage:  btcEthLeverage,
 		AltcoinLeverage: altcoinLeverage,
 		Account: kernel.AccountInfo{
+			InitialBalance:   at.initialBalance,
 			TotalEquity:      totalEquity,
 			AvailableBalance: availableBalance,
 			UnrealizedPnL:    totalUnrealizedProfit,
@@ -1249,6 +1254,10 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 		logger.Infof("  ⚠ Failed to set take profit: %v", err)
 	}
 
+	at.sendTradeWebhook("open_long", decision, actionRecord, map[string]float64{
+		"position_size_usd": decision.PositionSizeUSD,
+	})
+
 	return nil
 }
 
@@ -1366,6 +1375,10 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, acti
 		logger.Infof("  ⚠ Failed to set take profit: %v", err)
 	}
 
+	at.sendTradeWebhook("open_short", decision, actionRecord, map[string]float64{
+		"position_size_usd": decision.PositionSizeUSD,
+	})
+
 	return nil
 }
 
@@ -1428,6 +1441,10 @@ func (at *AutoTrader) executeCloseLongWithRecord(decision *kernel.Decision, acti
 
 	// Record order to database and poll for confirmation
 	at.recordAndConfirmOrder(order, decision.Symbol, "close_long", quantity, marketData.CurrentPrice, 0, entryPrice)
+
+	at.sendTradeWebhook("close_long", decision, actionRecord, map[string]float64{
+		"entry_price": entryPrice,
+	})
 
 	logger.Infof("  ✓ Position closed successfully")
 	return nil
@@ -1493,8 +1510,104 @@ func (at *AutoTrader) executeCloseShortWithRecord(decision *kernel.Decision, act
 	// Record order to database and poll for confirmation
 	at.recordAndConfirmOrder(order, decision.Symbol, "close_short", quantity, marketData.CurrentPrice, 0, entryPrice)
 
+	at.sendTradeWebhook("close_short", decision, actionRecord, map[string]float64{
+		"entry_price": entryPrice,
+	})
+
 	logger.Infof("  ✓ Position closed successfully")
 	return nil
+}
+
+func (at *AutoTrader) sendTradeWebhook(action string, decision *kernel.Decision, actionRecord *store.DecisionAction, extras map[string]float64) {
+	if decision == nil || actionRecord == nil {
+		return
+	}
+
+	content := at.buildTradeWebhookContent(action, decision, actionRecord, extras)
+	payload := map[string]interface{}{
+		"msgtype": "markdown",
+		"markdown": map[string]string{
+			"content": content,
+		},
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		logger.Infof("⚠️ Failed to marshal trade webhook payload: %v", err)
+		return
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequest(http.MethodPost, wechatWebhookURL, bytes.NewReader(body))
+	if err != nil {
+		logger.Infof("⚠️ Failed to create trade webhook request: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		logger.Infof("⚠️ Failed to send trade webhook: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logger.Infof("⚠️ Trade webhook returned unexpected status: %s", resp.Status)
+		return
+	}
+
+	logger.Infof("📣 Trade webhook sent: %s %s", decision.Symbol, action)
+}
+
+func (at *AutoTrader) buildTradeWebhookContent(action string, decision *kernel.Decision, actionRecord *store.DecisionAction, extras map[string]float64) string {
+	actionLabel := map[string]string{
+		"open_long":   "开多",
+		"open_short":  "开空",
+		"close_long":  "平多",
+		"close_short": "平空",
+	}[action]
+	if actionLabel == "" {
+		actionLabel = action
+	}
+
+	orderID := "N/A"
+	if actionRecord.OrderID != 0 {
+		orderID = fmt.Sprintf("%d", actionRecord.OrderID)
+	}
+
+	lines := []string{
+		fmt.Sprintf("## AI交易执行通知"),
+		fmt.Sprintf("> 交易员：`%s`", at.name),
+		fmt.Sprintf("> 交易所：`%s`", at.exchange),
+		fmt.Sprintf("> 时间：`%s`", time.Now().Format("2006-01-02 15:04:05")),
+		"",
+		fmt.Sprintf("- 动作：`%s`", actionLabel),
+		fmt.Sprintf("- 币种：`%s`", decision.Symbol),
+		fmt.Sprintf("- 订单ID：`%s`", orderID),
+		fmt.Sprintf("- 价格：`%.6f`", actionRecord.Price),
+		fmt.Sprintf("- 数量：`%.8f`", actionRecord.Quantity),
+		fmt.Sprintf("- 杠杆：`%d`", actionRecord.Leverage),
+		fmt.Sprintf("- 置信度：`%d`", decision.Confidence),
+	}
+
+	if v, ok := extras["position_size_usd"]; ok && v > 0 {
+		lines = append(lines, fmt.Sprintf("- 名义仓位：`%.2f USDT`", v))
+	}
+	if v, ok := extras["entry_price"]; ok && v > 0 {
+		lines = append(lines, fmt.Sprintf("- 开仓价：`%.6f`", v))
+	}
+	if decision.StopLoss > 0 {
+		lines = append(lines, fmt.Sprintf("- 止损：`%.6f`", decision.StopLoss))
+	}
+	if decision.TakeProfit > 0 {
+		lines = append(lines, fmt.Sprintf("- 止盈：`%.6f`", decision.TakeProfit))
+	}
+	if decision.Reasoning != "" {
+		lines = append(lines, fmt.Sprintf("- 原因：%s", decision.Reasoning))
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // GetID gets trader ID
